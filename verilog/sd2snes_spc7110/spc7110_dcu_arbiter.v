@@ -88,10 +88,10 @@ reg [10:0] darb_outbuf_rdloc;
 //Internal DCU wiring
 reg dcu_init;
 reg [1:0] dcu_init_mode;
-reg dcu_datarom_wait;
+wire dcu_datarom_wait;
 reg dcu_datarom_rd;
-reg [7:0] dcu_datarom_data;
-reg dcu_ob_wait;
+wire [7:0] dcu_datarom_data;
+wire dcu_ob_wait;
 reg dcu_ob_wr;
 reg [31:0] dcu_ob_data;
 
@@ -213,39 +213,39 @@ always @(posedge sfc_rd) begin
         case (sfc_dcu_port)
             DARB_PORT_BASE0: begin
                 buffer_pa_en <= 0;
-                sfc_data <= darb_directory_base & 24'h0000FF;
+                darb_output <= darb_directory_base & 24'h0000FF;
             end
             DARB_PORT_BASE1: begin
                 buffer_pa_en <= 0;
-                sfc_data <= (darb_directory_base & 24'h00FF00) >> 8;
+                darb_output <= (darb_directory_base & 24'h00FF00) >> 8;
             end
             DARB_PORT_BASE2: begin
                 buffer_pa_en <= 0;
-                sfc_data <= (darb_directory_base & 24'hFF0000) >> 16;
+                darb_output <= (darb_directory_base & 24'hFF0000) >> 16;
             end
             DARB_PORT_INDEX: begin
                 buffer_pa_en <= 0;
-                sfc_data <= darb_directory_index;
+                darb_output <= darb_directory_index;
             end
             DARB_PORT_OFFSET0: begin
                 buffer_pa_en <= 0;
-                sfc_data <= darb_offset_ctr & 16'h00FF;
+                darb_output <= darb_offset_ctr & 16'h00FF;
             end
             DARB_PORT_OFFSET1: begin
                 buffer_pa_en <= 0;
-                sfc_data <= (darb_offset_ctr & 16'hFF00) >> 8;
+                darb_output <= (darb_offset_ctr & 16'hFF00) >> 8;
             end
             DARB_PORT_COUNTER0: begin
                 buffer_pa_en <= 0;
-                sfc_data <= darb_length_ctr & 16'h00FF;
+                darb_output <= darb_length_ctr & 16'h00FF;
             end
             DARB_PORT_COUNTER1: begin
                 buffer_pa_en <= 0;
-                sfc_data <= (darb_length_ctr & 16'hFF00) >> 8;
+                darb_output <= (darb_length_ctr & 16'hFF00) >> 8;
             end
             DARB_PORT_BYPASS: begin
                 buffer_pa_en <= 0;
-                sfc_data <= ~darb_bypass_dcu << 1;
+                darb_output <= ~darb_bypass_dcu << 1;
             end
             DARB_PORT_STATUS: begin
                 buffer_pa_en <= 0;
@@ -256,9 +256,9 @@ always @(posedge sfc_rd) begin
                 //hold this port in the busy state until the output buffer was
                 //fuller...
                 if (darb_outbuf_rdloc != darb_outbuf_wrloc) begin
-                    sfc_data <= 8'h80;
+                    darb_output <= 8'h80;
                 end else begin
-                    sfc_data <= 8'h00;
+                    darb_output <= 8'h00;
                 end
             end
         endcase
@@ -329,22 +329,20 @@ always @(posedge CLK) begin
     end
 end
 
+assign psram_addr = darb_psram_addr;
+assign darb_rom_rd = darb_psram_ctr != 0;
+
 always @(posedge CLK) begin
     //PSRAM requires 7 master cycles for valid data to be asserted. Furthermore,
-    //the 65C816 can preempt our PSRAM accesses. So we use a psram_ctr register
-    //to store our psram read information while we count the cycles. Other code
-    //waiting for a PSRAM response can just set ctr and addr and wait for ctr
-    //to return to zero before checking psram_data for a response.
+    //the 65C816 can preempt our PSRAM accesses. So this logic will reset that
+    //counter if our wait gets preempted. All you have to do is wait for the ctr
+    //to reach zero again and then run your logic.
     if (!sfc_rom_rd & darb_psram_ctr > 0) begin
-        psram_addr <= darb_psram_addr;
         darb_psram_ctr <= darb_psram_ctr - 1;
-        darb_rom_rd <= 1;
     end else if (sfc_rom_rd & darb_psram_ctr > 0) begin
         //We don't need to change psram_addr, we just need to reset our ctr and
         //let the countdown logic reassert psram_addr...
         darb_psram_ctr <= DARB_PSRAM_TIMING;
-    end else if (darb_psram_ctr == 0) begin
-        darb_rom_rd <= 0;
     end
 end
 
@@ -410,8 +408,7 @@ always @(posedge CLK) begin
 end
 
 //DCU Service
-assign dcu_datarom_wait = darb_inbuf_wrloc == darb_inbuf_rdloc | darb_psram_state == DARB_PSRAM_QUEUE | 
-darb_bypass_dcu;
+assign dcu_datarom_wait = darb_inbuf_wrloc == darb_inbuf_rdloc | darb_psram_state == DARB_PSRAM_QUEUE | darb_bypass_dcu;
 assign dcu_ob_wait = darb_output_ctr != 0;
 assign dcu_datarom_data = buffer_pb_dataout;
 

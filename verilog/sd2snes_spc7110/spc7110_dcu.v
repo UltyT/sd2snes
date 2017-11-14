@@ -37,7 +37,7 @@ module spc7110_dcu(
     //ready, then release wait with data asserted. It will be consumed on the
     //next CLK.
     input dcu_datarom_wait,
-    output dcu_datarom_rd,
+    output reg dcu_datarom_rd,
     input [7:0] dcu_datarom_data,
     
     //DCU <-> Output Buffer
@@ -48,8 +48,8 @@ module spc7110_dcu(
     //buffer is ready again you may release wait after you have committed data
     //to the buffer.
     input dcu_ob_wait,
-    output dcu_ob_wr,
-    output [31:0] dcu_ob_data
+    output reg dcu_ob_wr,
+    output reg [31:0] dcu_ob_data
 );
 
 //Arithmetic coding constants
@@ -124,7 +124,7 @@ always @(posedge CLK) begin
     case (dcu_state)
         DCU_STATE_DATAREAD: begin
             if (!dcu_datarom_wait && dcu_state_ctr > 0) begin
-                dcu_input = dcu_input << 8 | dcu_datarom_data;
+                dcu_input <= dcu_input << 8 | dcu_datarom_data;
                 dcu_datarom_rd <= 0;
                 
                 dcu_state <= DCU_STATE_RENORMALIZE;
