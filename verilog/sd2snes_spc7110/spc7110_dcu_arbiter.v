@@ -42,9 +42,95 @@ module spc7110_dcu_arbiter(
     output [22:0] psram_addr
 );
 
-//MISC registers
-//These aren't attached to any particular logic, or are only handled by port IO
+//Internal buffer RAM wiring
+reg [10:0] buffer_pa_addr;
+reg buffer_pa_we;
+reg buffer_pa_en;
+reg [7:0] buffer_pa_datain;
+wire [7:0] buffer_pa_dataout;
+
+reg [10:0] buffer_pb_addr;
+reg buffer_pb_we;
+reg buffer_pb_en;
+reg [7:0] buffer_pb_datain;
+reg [7:0] buffer_pb_dataout;
+
+//Internal buffer RAM (8bitx2048)
+//This is used to store both compressed data from ROM as well as decompressed
+//data to be sent to the 65C816. It is structured as two ring buffers; the low
+//buffer is filled with 1K of ROM data for the DCU to asynchronously consume,
+//while the high buffer is filled with output from the DCU to be read from 4800
+//TODO: is 1024 ring bytes enough?
+spc7110_dcu_buffer rombuf (
+    //RAM Port A: Exclusively used to service 65C816 I/O access (e.g. DMA)
+    .clka(CLK),
+    .wea(buffer_pa_we),
+    .ena(buffer_pa_en),
+    .addra(buffer_pa_addr),
+    .dina(buffer_pa_datain),
+    .douta(sfc_data),
+    
+    //RAM Port B: DCU data prefetch (PSRAM -> Buffer -> DCU), DCU output buffer
+    .clkb(CLK),
+    .web(buffer_pb_we),
+    .enb(buffer_pb_en),
+    .addrb(buffer_pb_addr),
+    .dinb(buffer_pb_datain),
+    .doutb(buffer_pb_dataout)
+);
+
+//Ring Buffer Management
+reg [10:0] darb_inbuf_wrloc; //Next byte to write to.
+reg [10:0] darb_inbuf_rdloc; //Next byte to read from.
+reg [10:0] darb_outbuf_wrloc;
+reg [10:0] darb_outbuf_rdloc;
+
+//Internal DCU wiring
+reg dcu_init;
+reg [1:0] dcu_init_mode;
+reg dcu_datarom_wait;
+reg dcu_datarom_rd;
+reg [7:0] dcu_datarom_data;
+reg dcu_ob_wait;
+reg dcu_ob_wr;
+reg [31:0] dcu_ob_data;
+
+//Directory, pointer, and other useful registers go here.
+reg [23:0] darb_directory_base;
+reg [7:0] darb_directory_index;
+reg [23:0] darb_index_ptr;
+reg [23:0] darb_decompress_ptr;
+
+parameter DARB_PSRAM_INACTIVE = 3'b001; //PSRAM not in use
+parameter DARB_PSRAM_STORE    = 3'b010; //PSRAM data recieved, registering
+parameter DARB_PSRAM_QUEUE    = 3'b100; //Writing registered data to buffer
+
+reg [22:0] darb_psram_addr;
+reg [3:0] darb_psram_ctr;
+reg [2:0] darb_psram_state;
+reg [15:0] darb_psram_data;
+
+reg [2:0] darb_state;
+reg [2:0] darb_state_ctr;
+
+reg [23:0] darb_datarom_ptr;
+
 reg [15:0] darb_length_ctr;
+reg [15:0] darb_offset_ctr;
+
+reg [31:0] darb_output_data;
+reg [2:0] darb_output_ctr;
+
+reg darb_bypass_dcu; //If enabled, DCU will remain in waitstate...
+
+reg [7:0] darb_output;
+
+//These are used for tracking IO access...
+parameter DARB_STATE_MODEREAD = 3'b001; //read DIR into mode register
+parameter DARB_STATE_ADDRREAD = 3'b010; //read DIR+1 into addr register
+parameter DARB_STATE_READY    = 3'b100; //start buffering data, DCU is init'd
+
+parameter DARB_PSRAM_TIMING = 4'd7; //70ns, plus a little more because cycles
 
 //Ports are mapped to $4800 by address.v
 parameter DARB_PORT_READ     = 4'h0;
@@ -179,7 +265,6 @@ always @(posedge sfc_rd) begin
     end
 end
 
-reg [7:0] darb_output;
 assign sfc_data = buffer_pa_dataout | darb_output;
 
 //Port-A output is hardwired onto the SFC data bus, so we have to disable it
@@ -190,24 +275,6 @@ always @(negedge sfc_rd) begin
 end
 
 //Directory change-over logic
-reg [23:0] darb_directory_base;
-reg [7:0] darb_directory_index;
-reg [23:0] darb_index_ptr;
-
-reg [22:0] darb_psram_addr;
-reg [3:0] darb_psram_ctr;
-
-reg [2:0] darb_state;
-reg [2:0] darb_state_ctr;
-
-reg [23:0] darb_datarom_ptr;
-
-parameter DARB_STATE_MODEREAD = 3'b001; //read DIR into mode register
-parameter DARB_STATE_ADDRREAD = 3'b010; //read DIR+1 into addr register
-parameter DARB_STATE_READY    = 3'b100; //start buffering data, DCU is init'd
-
-parameter DARB_PSRAM_TIMING = 4'd7; //70ns, plus a little more because cycles
-
 always @(posedge CLK) begin
     if (darb_psram_ctr == 0) begin
         case (darb_state)
@@ -281,59 +348,6 @@ always @(posedge CLK) begin
     end
 end
 
-//Internal buffer RAM wiring
-reg [10:0] buffer_pa_addr;
-reg buffer_pa_we;
-reg buffer_pa_en;
-reg [7:0] buffer_pa_datain;
-wire [7:0] buffer_pa_dataout;
-
-reg [10:0] buffer_pb_addr;
-reg buffer_pb_we;
-reg buffer_pb_en;
-reg [7:0] buffer_pb_datain;
-reg [7:0] buffer_pb_dataout;
-
-//Internal buffer RAM (8bitx2048)
-//This is used to store both compressed data from ROM as well as decompressed
-//data to be sent to the 65C816. It is structured as two ring buffers; the low
-//buffer is filled with 1K of ROM data for the DCU to asynchronously consume,
-//while the high buffer is filled with output from the DCU to be read from 4800
-//TODO: is 1024 ring bytes enough?
-spc7110_dcu_buffer rombuf (
-    //RAM Port A: Exclusively used to service 65C816 I/O access (e.g. DMA)
-    .clka(CLK),
-    .wea(buffer_pa_we),
-    .ena(buffer_pa_en),
-    .addra(buffer_pa_addr),
-    .dina(buffer_pa_datain),
-    .douta(sfc_data),
-    
-    //RAM Port B: DCU data prefetch (PSRAM -> Buffer -> DCU), DCU output buffer
-    .clkb(CLK),
-    .web(buffer_pb_we),
-    .enb(buffer_pb_en),
-    .addrb(buffer_pb_addr),
-    .dinb(buffer_pb_datain),
-    .doutb(buffer_pb_dataout),
-);
-
-//Ring Buffer Management
-reg [10:0] darb_inbuf_wrloc; //Next byte to write to.
-reg [10:0] darb_inbuf_rdloc; //Next byte to read from.
-reg [10:0] darb_outbuf_wrloc;
-reg [10:0] darb_outbuf_rdloc;
-
-//Internal DCU wiring
-reg dcu_init;
-reg [1:0] dcu_init_mode;
-reg dcu_datarom_wait;
-reg dcu_datarom_rd;
-reg [7:0] dcu_datarom_data;
-reg dcu_ob_wait;
-reg dcu_ob_wr;
-reg [31:0] dcu_ob_data;
-
 //Internal DCU
 spc7110_dcu dcu (
     .CLK(CLK),
@@ -348,13 +362,6 @@ spc7110_dcu dcu (
 );
 
 //PSRAM Service
-parameter DARB_PSRAM_INACTIVE = 3'b001; //PSRAM not in use
-parameter DARB_PSRAM_STORE    = 3'b010; //PSRAM data recieved, registering
-parameter DARB_PSRAM_QUEUE    = 3'b100; //Writing registered data to buffer
-
-reg [2:0] darb_psram_state;
-reg [15:0] darb_psram_data;
-
 always @(posedge CLK) begin
     //Priority 0 on Port B: Servicing PSRAM buffering.
     if (darb_state == DARB_STATE_READY && darb_psram_ctr == 0) begin
@@ -366,7 +373,7 @@ always @(posedge CLK) begin
                 if (((darb_inbuf_wrloc + 1 & 11'h3FF) != darb_inbuf_rdloc) &
                     ((darb_inbuf_wrloc + 2 & 11'h3FF) != darb_inbuf_rdloc)) begin
                     //We have PSRAM space, so let's start a PSRAM fetch.
-                    darb_psram_state <= DARB_PSRAM_WAIT;
+                    darb_psram_state <= DARB_PSRAM_STORE;
                     darb_psram_ctr <= DARB_PSRAM_TIMING;
                     darb_psram_addr <= darb_decompress_ptr >> 1;
                 end
@@ -408,11 +415,6 @@ darb_bypass_dcu;
 assign dcu_ob_wait = darb_output_ctr != 0;
 assign dcu_datarom_data = buffer_pb_dataout;
 
-reg [31:0] darb_output_data;
-reg [2:0] darb_output_ctr;
-
-reg darb_bypass_dcu; //If enabled, DCU will remain in waitstate...
-
 always @(posedge CLK) begin
     //Priority 2 on Port B: Servicing DCU data reads.
     if (darb_state == DARB_STATE_READY 
@@ -443,7 +445,7 @@ always @(posedge CLK) begin
                 & (darb_outbuf_wrloc + 1 & 11'h3FF) != darb_outbuf_rdloc
                 & darb_psram_state != DARB_PSRAM_QUEUE) begin
         buffer_pb_addr <= darb_outbuf_wrloc | 11'h700;
-        buffer_pb_datain <= darb_output_data & 8'bFF;
+        buffer_pb_datain <= darb_output_data & 8'hFF;
         buffer_pb_we <= 1;
         buffer_pb_en <= 1;
         
@@ -454,8 +456,6 @@ always @(posedge CLK) begin
 end
 
 //Offset / Length logic
-reg [15:0] darb_offset_ctr;
-
 always @(posedge CLK) begin
     if (darb_state == DARB_STATE_READY & darb_outbuf_wrloc != darb_outbuf_rdloc & darb_offset_ctr > 0) begin
         darb_offset_ctr <= darb_offset_ctr - 1;

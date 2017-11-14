@@ -52,6 +52,47 @@ module spc7110_dcu(
     output [31:0] dcu_ob_data
 );
 
+//Arithmetic coding constants
+reg [7:0] dcu_table_prob[52:0];
+reg [7:0] dcu_table_lps[52:0]; //TODO: Do these require all 8 bits?
+reg [7:0] dcu_table_mps[52:0];
+reg dcu_table_invert[52:0];
+
+reg [15:0] dcu_length;
+
+//Now the contexts that drive those arithmetic coders.
+//Higan says not all 74 contexts exist but I'm not 100% sure how to figure.
+reg [7:0] dcu_ctx_pred[74:0];
+reg dcu_ctx_swap[74:0];
+
+reg [7:0] dcu_selected_ctx;
+reg [7:0] dcu_selected_model;
+reg [8:0] dcu_range;
+reg [2:0] dcu_diffcode;
+reg [3:0] dcu_pa;
+reg [3:0] dcu_pb;
+reg [3:0] dcu_pc;
+reg [8:0] dcu_lps_offset;
+reg [1:0] dcu_plane;
+reg [7:0] dcu_index;
+
+reg [2:0] dcu_pixel;
+reg [7:0] dcu_history;
+reg dcu_symbol_ismps;
+
+reg [7:0] dcu_symbol;
+reg [63:0] dcu_pixels;
+reg [63:0] dcu_colormap;
+reg [63:0] dcu_map;
+reg [63:0] dcu_morton;
+
+//DCU Input Registers
+reg [15:0] dcu_input;
+reg [4:0] dcu_input_bits;
+
+//DCU Output Registers
+reg [31:0] dcu_output;
+
 reg [9:0] dcu_state;
 reg [6:0] dcu_state_ctr; //for counting reads
 
@@ -116,47 +157,6 @@ always @(posedge CLK) begin
     endcase
 end
 
-//Arithmetic coding constants
-reg [7:0] dcu_table_prob[52:0];
-reg [7:0] dcu_table_lps[52:0]; //TODO: Do these require all 8 bits?
-reg [7:0] dcu_table_mps[52:0];
-reg dcu_table_invert[52:0];
-
-reg [15:0] dcu_length;
-
-//Now the contexts that drive those arithmetic coders.
-//Higan says not all 74 contexts exist but I'm not 100% sure how to figure.
-reg [7:0] dcu_ctx_pred[74:0];
-reg dcu_ctx_swap[74:0];
-
-reg [7:0] dcu_selected_ctx;
-reg [7:0] dcu_selected_model;
-reg [8:0] dcu_range;
-reg [2:0] dcu_diffcode;
-reg [3:0] dcu_pa;
-reg [3:0] dcu_pb;
-reg [3:0] dcu_pc;
-reg [8:0] dcu_lps_offset;
-reg [1:0] dcu_plane;
-reg [7:0] dcu_index;
-
-reg [2:0] dcu_pixel;
-reg [7:0] dcu_history;
-reg dcu_symbol_ismps;
-
-reg [7:0] dcu_symbol;
-reg [63:0] dcu_pixels;
-reg [63:0] dcu_colormap;
-reg [63:0] dcu_map;
-reg [63:0] dcu_morton;
-
-//DCU Input Registers
-reg [15:0] dcu_input;
-reg [4:0] dcu_input_bits;
-
-//DCU Output Registers
-reg [31:0] dcu_output;
-
 //Decompression logic
 always @(posedge CLK) begin
     case (dcu_state)
@@ -205,7 +205,7 @@ always @(posedge CLK) begin
                     dcu_diffcode <= 0;
                     
                     dcu_state <= DCU_STATE_PLANE;
-                    dcu_state_ctx <= 0;
+                    dcu_state_ctr <= 0;
                 end
                 DCU_DECOMPMODE_2BPP: begin
                     dcu_pa <= dcu_pixels >> 2 & 2'b11;
@@ -232,7 +232,7 @@ always @(posedge CLK) begin
                     dcu_diffcode <= 4;
 
                 dcu_state <= DCU_STATE_SHUFFLEMAP;
-                dcu_state_ctx <= 0;
+                dcu_state_ctr <= 0;
             end
         end
         DCU_STATE_SHUFFLEMAP: begin
@@ -244,7 +244,7 @@ always @(posedge CLK) begin
             if (dcu_decompress_mode == DCU_DECOMPMODE_1BPP) begin
                 //Technically an illegal state. Go onto the next one anyway
                 dcu_state <= DCU_STATE_PLANE;
-                dcu_state_ctx <= 0;
+                dcu_state_ctr <= 0;
             end else if (dcu_state_ctr < 16) begin
                 if (((dcu_colormap >> dcu_state_ctr & 4'b1111) & 4'b1111) != dcu_pa)
                     dcu_state_ctr <= dcu_state_ctr + 1;
@@ -283,7 +283,7 @@ always @(posedge CLK) begin
                 end
             end else begin
                 dcu_state <= DCU_STATE_PLANE;
-                dcu_state_ctx <= 0;
+                dcu_state_ctr <= 0;
             end
         end
         DCU_STATE_PLANE: begin
@@ -292,27 +292,27 @@ always @(posedge CLK) begin
             case (dcu_decompress_mode)
                 DCU_DECOMPMODE_1BPP: begin
                     dcu_history <= (1 << dcu_pixel - 1) & dcu_symbol;
-                    if (dcu_plane >= 2 & history <= 1)
-                        dcu_selected_ctx <= (dcu_diffcode) * 15 + (1 << dcu_plane) + (history - 1);
+                    if (dcu_plane >= 2 & dcu_history <= 1)
+                        dcu_selected_ctx <= (dcu_diffcode) * 15 + (1 << dcu_plane) + (dcu_history - 1);
                     else
-                        dcu_selected_ctx <= (dcu_pixel >> 2) * 15 + (1 << dcu_pixel) + (history - 1);
+                        dcu_selected_ctx <= (dcu_pixel >> 2) * 15 + (1 << dcu_pixel) + (dcu_history - 1);
                 end
                 DCU_DECOMPMODE_2BPP: begin
                     dcu_history <= (1 << dcu_plane - 1) & dcu_symbol;
-                    dcu_selected_ctx <= (dcu_diffcode) * 15 + (1 << dcu_plane) + (history - 1);
+                    dcu_selected_ctx <= (dcu_diffcode) * 15 + (1 << dcu_plane) + (dcu_history - 1);
                 end
                 DCU_DECOMPMODE_4BPP: begin
                     dcu_history <= (1 << dcu_plane - 1) & dcu_symbol;
-                    if (dcu_plane >= 2 & history <= 1)
-                        dcu_selected_ctx <= (dcu_diffcode) * 15 + (1 << dcu_plane) + (history - 1);
+                    if (dcu_plane >= 2 & dcu_history <= 1)
+                        dcu_selected_ctx <= (dcu_diffcode) * 15 + (1 << dcu_plane) + (dcu_history - 1);
                     else
-                        dcu_selected_ctx <= (1 << dcu_plane) + (history - 1);
+                        dcu_selected_ctx <= (1 << dcu_plane) + (dcu_history - 1);
                 end
             endcase
             
             dcu_selected_model <= dcu_ctx_pred[dcu_selected_ctx];
             dcu_lps_offset <= dcu_range - dcu_table_prob[dcu_selected_model];
-            dcu_symbol_ismps <= (dcu_input >= (lps_offset << 8));
+            dcu_symbol_ismps <= (dcu_input >= (dcu_lps_offset << 8));
             dcu_symbol <= dcu_symbol << 1 | (dcu_symbol_ismps ^ dcu_ctx_swap[dcu_selected_ctx]);
             
             if (dcu_symbol_ismps) //More-probable symbol
