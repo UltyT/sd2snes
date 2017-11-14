@@ -31,9 +31,10 @@ module spc7110_dcu_arbiter(
     
     //SFC I/O ports
     input darb_sfc_enable,      //SFC reads/writes map to DCU
+    input darb_decomp_mirror,   //that stupid $50:0000-FFFF mirror
     input [3:0] sfc_dcu_port,
-    input sfc_dcu_rd,
-    input sfc_dcu_wr,
+    input sfc_rd,
+    input sfc_wr,
     inout [7:0] sfc_data,
     
     //PSRAM control - for some reason we have a 16-bit data bus on sd2snes...
@@ -60,7 +61,7 @@ parameter DARB_PORT_COUNTER1 = 4'hA;
 parameter DARB_PORT_BYPASS   = 4'hB; //write 00 = bypass DCU, 02 = enable DCU
 parameter DARB_PORT_STATUS   = 4'hC;
 
-always @(posedge sfc_dcu_wr) begin
+always @(posedge sfc_wr) begin
     if (darb_sfc_enable) begin
         case (sfc_dcu_port)
             DARB_PORT_BASE0: begin
@@ -97,30 +98,33 @@ always @(posedge sfc_dcu_wr) begin
     end
 end
 
-always @(posedge sfc_dcu_rd) begin
+always @(posedge sfc_rd) begin
+    if ((darb_sfc_enable && sfc_dcu_port == DARB_PORT_READ) || darb_decomp_mirror) begin
+        //WARNING: This port read does not attempt to address flow
+        //control issues. It is assumed the 65C816 will heed STATUS and
+        //not read READ until we tell it to. If it disobeys this then
+        //ring status will become corrupted.
+        if (darb_bypass_dcu) begin
+            buffer_pa_addr <= darb_inbuf_rdloc & 11'h3FF;
+            buffer_pa_en <= 1;
+            buffer_pa_we <= 0;
+
+            darb_inbuf_rdloc <= darb_inbuf_rdloc + 1;
+            darb_length_ctr <= darb_length_ctr - 1;
+        end else begin
+            buffer_pa_addr <= darb_outbuf_rdloc | 11'h700;
+            buffer_pa_en <= 1;
+            buffer_pa_we <= 0;
+
+            darb_outbuf_rdloc <= darb_outbuf_rdloc + 1;
+            darb_length_ctr <= darb_length_ctr - 1;
+        end
+    end
+end
+
+always @(posedge sfc_rd) begin
     if (darb_sfc_enable) begin
         case (sfc_dcu_port)
-            DARB_PORT_READ: begin
-                //WARNING: This port read does not attempt to address flow
-                //control issues. It is assumed the 65C816 will heed STATUS and
-                //not read READ until we tell it to. If it disobeys this then
-                //ring status will become corrupted.
-                if (darb_bypass_dcu) begin
-                    buffer_pa_addr <= darb_inbuf_rdloc & 11'h3FF;
-                    buffer_pa_en <= 1;
-                    buffer_pa_we <= 0;
-                    
-                    darb_inbuf_rdloc <= darb_inbuf_rdloc + 1;
-                    darb_length_ctr <= darb_length_ctr - 1;
-                end else begin
-                    buffer_pa_addr <= darb_outbuf_rdloc | 11'h700;
-                    buffer_pa_en <= 1;
-                    buffer_pa_we <= 0;
-
-                    darb_outbuf_rdloc <= darb_outbuf_rdloc + 1;
-                    darb_length_ctr <= darb_length_ctr - 1;
-                end
-            end
             DARB_PORT_BASE0: begin
                 buffer_pa_en <= 0;
                 sfc_data <= darb_directory_base & 24'h0000FF;
@@ -180,7 +184,7 @@ assign sfc_data = buffer_pa_dataout | darb_output;
 
 //Port-A output is hardwired onto the SFC data bus, so we have to disable it
 //when the read request ends.
-always @(negedge sfc_dcu_rd) begin
+always @(negedge sfc_rd) begin
     buffer_pa_en <= 0;
     darb_output <= 0;
 end
