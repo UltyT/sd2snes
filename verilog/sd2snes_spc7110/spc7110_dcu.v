@@ -37,7 +37,7 @@ module spc7110_dcu(
     //ready, then release wait with data asserted. It will be consumed on the
     //next CLK.
     input dcu_datarom_wait,
-    output reg dcu_datarom_rd,
+    output dcu_datarom_rd,
     input [7:0] dcu_datarom_data,
     
     //DCU <-> Output Buffer
@@ -48,8 +48,8 @@ module spc7110_dcu(
     //buffer is ready again you may release wait after you have committed data
     //to the buffer.
     input dcu_ob_wait,
-    output reg dcu_ob_wr,
-    output reg [31:0] dcu_ob_data
+    output dcu_ob_wr,
+    output [31:0] dcu_ob_data
 );
 
 //Arithmetic coding constants
@@ -120,26 +120,35 @@ always @(posedge dcu_init) begin
 end
 
 //Input/Output states
+reg dcu_ios_ob_wr;
+reg [31:0] dcu_ios_ob_data;
+reg dcu_ios_datarom_rd;
+reg dcu_preread_datarom_rd;
+
+assign dcu_ob_wr = dcu_ios_ob_wr;
+assign dcu_ob_data = dcu_ios_ob_data;
+assign dcu_datarom_rd = (dcu_ios_datarom_rd | dcu_preread_datarom_rd);
+
 always @(posedge CLK) begin
     case (dcu_state)
         DCU_STATE_DATAREAD: begin
             if (!dcu_datarom_wait && dcu_state_ctr > 0) begin
                 dcu_input <= dcu_input << 8 | dcu_datarom_data;
-                dcu_datarom_rd <= 0;
+                dcu_ios_datarom_rd <= 0;
                 
                 dcu_state <= DCU_STATE_RENORMALIZE;
                 dcu_state_ctr <= 0;
             end
             
             if (dcu_state_ctr == 0) begin
-                dcu_datarom_rd <= 1;
+                dcu_ios_datarom_rd <= 1;
                 
-                dcu_state_ctr = 1;
+                dcu_state_ctr <= 1;
             end
         end
         DCU_STATE_OUTBUFFER: begin
             if (dcu_state_ctr > 0) begin
-                dcu_ob_wr <= 0;
+                dcu_ios_ob_wr <= 0;
             end
             
             if (!dcu_ob_wait && dcu_state_ctr > 0) begin
@@ -148,8 +157,8 @@ always @(posedge CLK) begin
             end
             
             if (!dcu_ob_wait && dcu_state_ctr == 0) begin
-                dcu_ob_wr <= 1;
-                dcu_ob_data <= dcu_output;
+                dcu_ios_ob_wr <= 1;
+                dcu_ios_ob_data <= dcu_output;
                 
                 dcu_state_ctr <= 1;
             end
@@ -157,14 +166,17 @@ always @(posedge CLK) begin
     endcase
 end
 
+reg [7:0] dcu_i;
+
 //Decompression logic
+
 always @(posedge CLK) begin
     case (dcu_state)
         DCU_STATE_DCINIT: begin
             //TODO: Does this run fast enough for one CLK? Probably not
-            for (dcu_state_ctr = 0; dcu_state_ctr <= 75; dcu_state_ctr = dcu_state_ctr + 1) begin
-                dcu_ctx_pred[dcu_state_ctr] = 8'h00;
-                dcu_ctx_swap[dcu_state_ctr] = 1'b0;
+            for (dcu_i = 0; dcu_i < 75; dcu_i = dcu_i + 1) begin
+                dcu_ctx_pred[dcu_i] <= 6'h00;
+                dcu_ctx_swap[dcu_i] <= 1'b0;
             end
             
             //TODO: Support offsetting...
@@ -190,9 +202,9 @@ always @(posedge CLK) begin
 
                 dcu_input_bits <= 8;
 
-                dcu_datarom_rd <= 0;
+                dcu_preread_datarom_rd <= 0;
             end else begin
-                dcu_datarom_rd <= 1;
+                dcu_preread_datarom_rd <= 1;
 
                 dcu_state_ctr <= dcu_state_ctr + 1;
             end
@@ -249,7 +261,7 @@ always @(posedge CLK) begin
                 if (((dcu_colormap >> dcu_state_ctr & 4'b1111) & 4'b1111) != dcu_pa)
                     dcu_state_ctr <= dcu_state_ctr + 1;
                 else begin
-                    dcu_state_ctr = 16;
+                    dcu_state_ctr <= 16;
                     dcu_colormap <= dcu_colormap & (64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                                   | (dcu_colormap << 4) & ~(64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                                   | dcu_pa;
@@ -258,7 +270,7 @@ always @(posedge CLK) begin
                 if (((dcu_map >> dcu_state_ctr & 4'b1111) & 4'b1111) != dcu_pc)
                     dcu_state_ctr <= dcu_state_ctr + 1;
                 else begin
-                    dcu_state_ctr = 16;
+                    dcu_state_ctr <= 16;
                     dcu_map <= dcu_map & (64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                             | (dcu_map << 4) & ~(64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                             | dcu_pc;
@@ -267,7 +279,7 @@ always @(posedge CLK) begin
                 if (((dcu_map >> dcu_state_ctr & 4'b1111) & 4'b1111) != dcu_pb)
                     dcu_state_ctr <= dcu_state_ctr + 1;
                 else begin
-                    dcu_state_ctr = 16;
+                    dcu_state_ctr <= 16;
                     dcu_map <= dcu_map & (64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                             | (dcu_map << 4) & ~(64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                             | dcu_pb;
@@ -276,7 +288,7 @@ always @(posedge CLK) begin
                 if (((dcu_map >> dcu_state_ctr & 4'b1111) & 4'b1111) != dcu_pa)
                     dcu_state_ctr <= dcu_state_ctr + 1;
                 else begin
-                    dcu_state_ctr = 16;
+                    dcu_state_ctr <= 16;
                     dcu_map <= dcu_map & (64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                             | (dcu_map << 4) & ~(64'hFFFFFFFFFFFFFFF0 << ((dcu_state_ctr & 4'b1111) << 2))
                             | dcu_pa;

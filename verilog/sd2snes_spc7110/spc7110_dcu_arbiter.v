@@ -44,16 +44,16 @@ module spc7110_dcu_arbiter(
 
 //Internal buffer RAM wiring
 reg [10:0] buffer_pa_addr;
-reg buffer_pa_we;
-reg buffer_pa_en;
-reg [7:0] buffer_pa_datain;
+wire buffer_pa_we = 0;
+wire buffer_pa_en;
+wire [7:0] buffer_pa_datain = 8'h00;
 wire [7:0] buffer_pa_dataout;
 
-reg [10:0] buffer_pb_addr;
-reg buffer_pb_we;
-reg buffer_pb_en;
-reg [7:0] buffer_pb_datain;
-reg [7:0] buffer_pb_dataout;
+wire [10:0] buffer_pb_addr;
+wire buffer_pb_we;
+wire buffer_pb_en = 1;
+wire [7:0] buffer_pb_datain;
+wire [7:0] buffer_pb_dataout;
 
 //Internal buffer RAM (8bitx2048)
 //This is used to store both compressed data from ROM as well as decompressed
@@ -68,7 +68,7 @@ spc7110_dcu_buffer rombuf (
     .ena(buffer_pa_en),
     .addra(buffer_pa_addr),
     .dina(buffer_pa_datain),
-    .douta(sfc_data),
+    .douta(buffer_pa_dataout),
     
     //RAM Port B: DCU data prefetch (PSRAM -> Buffer -> DCU), DCU output buffer
     .clkb(CLK),
@@ -89,11 +89,11 @@ reg [10:0] darb_outbuf_rdloc;
 reg dcu_init;
 reg [1:0] dcu_init_mode;
 wire dcu_datarom_wait;
-reg dcu_datarom_rd;
+wire dcu_datarom_rd;
 wire [7:0] dcu_datarom_data;
 wire dcu_ob_wait;
-reg dcu_ob_wr;
-reg [31:0] dcu_ob_data;
+wire dcu_ob_wr;
+wire [31:0] dcu_ob_data;
 
 //Directory, pointer, and other useful registers go here.
 reg [23:0] darb_directory_base;
@@ -147,108 +147,93 @@ parameter DARB_PORT_COUNTER1 = 4'hA;
 parameter DARB_PORT_BYPASS   = 4'hB; //write 00 = bypass DCU, 02 = enable DCU
 parameter DARB_PORT_STATUS   = 4'hC;
 
+reg darb_should_begin_moderead;
+
 always @(posedge sfc_wr) begin
     if (darb_sfc_enable) begin
         case (sfc_dcu_port)
             DARB_PORT_BASE0: begin
                 darb_directory_base <= darb_directory_base & 24'hFFFF00 | sfc_data;
+                darb_should_begin_moderead <= 0;
             end
             DARB_PORT_BASE1: begin
                 darb_directory_base <= darb_directory_base & 24'hFF00FF | sfc_data;
+                darb_should_begin_moderead <= 0;
             end
             DARB_PORT_BASE2: begin
                 darb_directory_base <= darb_directory_base & 24'h00FFFF | sfc_data;
+                darb_should_begin_moderead <= 0;
             end
             DARB_PORT_INDEX: begin
                 darb_directory_index <= sfc_data;
+                darb_should_begin_moderead <= 0;
             end
             DARB_PORT_OFFSET0: begin
                 darb_offset_ctr <= darb_offset_ctr & 16'hFF00 | sfc_data;
+                darb_should_begin_moderead <= 0;
             end
             DARB_PORT_OFFSET1: begin
                 darb_offset_ctr <= sfc_data << 8 | darb_offset_ctr & 16'h00FF;
-                
-                darb_index_ptr <= darb_directory_base + darb_directory_index * 4;
-                darb_state <= DARB_STATE_MODEREAD;
+                darb_should_begin_moderead <= 1;
             end
             DARB_PORT_COUNTER0: begin
                 darb_length_ctr <= darb_length_ctr & 16'hFF00 | sfc_data;
+                darb_should_begin_moderead <= 0;
             end
             DARB_PORT_COUNTER1: begin
                 darb_length_ctr <= sfc_data << 8 | darb_length_ctr & 16'h00FF;
+                darb_should_begin_moderead <= 0;
             end
             DARB_PORT_BYPASS: begin
                 darb_bypass_dcu <= ~((sfc_data & 8'h02) >> 1);
+                darb_should_begin_moderead <= 0;
             end
         endcase
     end
 end
 
-always @(posedge sfc_rd) begin
-    if ((darb_sfc_enable && sfc_dcu_port == DARB_PORT_READ) || darb_decomp_mirror) begin
-        //WARNING: This port read does not attempt to address flow
-        //control issues. It is assumed the 65C816 will heed STATUS and
-        //not read READ until we tell it to. If it disobeys this then
-        //ring status will become corrupted.
-        if (darb_bypass_dcu) begin
-            buffer_pa_addr <= darb_inbuf_rdloc & 11'h3FF;
-            buffer_pa_en <= 1;
-            buffer_pa_we <= 0;
+wire darb_readport_enable;
 
-            darb_inbuf_rdloc <= darb_inbuf_rdloc + 1;
-            darb_length_ctr <= darb_length_ctr - 1;
-        end else begin
-            buffer_pa_addr <= darb_outbuf_rdloc | 11'h700;
-            buffer_pa_en <= 1;
-            buffer_pa_we <= 0;
+assign darb_readport_enable = darb_sfc_enable ? (sfc_dcu_port == DARB_PORT_READ)
+                                : darb_decomp_mirror;
+assign buffer_pa_en = darb_sfc_enable ? (sfc_dcu_port == DARB_PORT_READ)
+                                : darb_decomp_mirror;
 
-            darb_outbuf_rdloc <= darb_outbuf_rdloc + 1;
-            darb_length_ctr <= darb_length_ctr - 1;
-        end
-    end
-end
+reg sfc_rd_last;
 
-always @(posedge sfc_rd) begin
-    if (darb_sfc_enable) begin
+assign sfc_rd_posedge = sfc_rd & ~sfc_rd_last;
+
+always @(posedge CLK) begin
+    if (sfc_rd_posedge & darb_sfc_enable) begin
         case (sfc_dcu_port)
             DARB_PORT_BASE0: begin
-                buffer_pa_en <= 0;
                 darb_output <= darb_directory_base & 24'h0000FF;
             end
             DARB_PORT_BASE1: begin
-                buffer_pa_en <= 0;
                 darb_output <= (darb_directory_base & 24'h00FF00) >> 8;
             end
             DARB_PORT_BASE2: begin
-                buffer_pa_en <= 0;
                 darb_output <= (darb_directory_base & 24'hFF0000) >> 16;
             end
             DARB_PORT_INDEX: begin
-                buffer_pa_en <= 0;
                 darb_output <= darb_directory_index;
             end
             DARB_PORT_OFFSET0: begin
-                buffer_pa_en <= 0;
                 darb_output <= darb_offset_ctr & 16'h00FF;
             end
             DARB_PORT_OFFSET1: begin
-                buffer_pa_en <= 0;
                 darb_output <= (darb_offset_ctr & 16'hFF00) >> 8;
             end
             DARB_PORT_COUNTER0: begin
-                buffer_pa_en <= 0;
                 darb_output <= darb_length_ctr & 16'h00FF;
             end
             DARB_PORT_COUNTER1: begin
-                buffer_pa_en <= 0;
                 darb_output <= (darb_length_ctr & 16'hFF00) >> 8;
             end
             DARB_PORT_BYPASS: begin
-                buffer_pa_en <= 0;
                 darb_output <= ~darb_bypass_dcu << 1;
             end
             DARB_PORT_STATUS: begin
-                buffer_pa_en <= 0;
                 //TODO: Is this sufficient flow control?
                 //fullsnes seems to imply this is read before each byte, but
                 //that would be incompatible with S-DMA usage... If we were
@@ -262,20 +247,49 @@ always @(posedge sfc_rd) begin
                 end
             end
         endcase
+    end else if (darb_readport_enable) begin
+        //WARNING: This port read does not attempt to address flow
+        //control issues. It is assumed the 65C816 will heed STATUS and
+        //not read READ until we tell it to. If it disobeys this then
+        //ring status will become corrupted.
+        if (darb_bypass_dcu) begin
+            buffer_pa_addr <= darb_inbuf_rdloc & 11'h3FF;
+
+            //We do not decrement inbuf_rdloc here because Verilog.
+            //Look at the OTHER thing that decrements it...
+            darb_length_ctr <= darb_length_ctr - 1;
+        end else begin
+            buffer_pa_addr <= darb_outbuf_rdloc | 11'h700;
+
+            darb_outbuf_rdloc <= darb_outbuf_rdloc + 1;
+            darb_length_ctr <= darb_length_ctr - 1;
+        end
     end
+    
+    //Offsetting logic has to live here...
+    if (darb_state == DARB_STATE_READY
+            & darb_outbuf_wrloc != darb_outbuf_rdloc
+            & darb_offset_ctr > 0) begin
+        darb_offset_ctr <= darb_offset_ctr - 1;
+        darb_outbuf_rdloc <= darb_outbuf_rdloc + 1;
+    end
+    
+    sfc_rd_last <= sfc_rd;
 end
 
 assign sfc_data = buffer_pa_dataout | darb_output;
 
-//Port-A output is hardwired onto the SFC data bus, so we have to disable it
-//when the read request ends.
-always @(negedge sfc_rd) begin
-    buffer_pa_en <= 0;
-    darb_output <= 0;
-end
+//PSRAM logic, all of it...
+reg darb_psram_pb_we;
+reg [7:0] darb_psram_pb_datain;
 
-//Directory change-over logic
 always @(posedge CLK) begin
+    if (darb_should_begin_moderead) begin
+        darb_state <= DARB_STATE_MODEREAD;
+        darb_psram_ctr <= 0;
+        darb_index_ptr <= darb_directory_base + darb_directory_index * 4;
+    end
+    
     if (darb_psram_ctr == 0) begin
         case (darb_state)
             DARB_STATE_MODEREAD: begin
@@ -327,40 +341,7 @@ always @(posedge CLK) begin
             end
         endcase
     end
-end
-
-assign psram_addr = darb_psram_addr;
-assign darb_rom_rd = darb_psram_ctr != 0;
-
-always @(posedge CLK) begin
-    //PSRAM requires 7 master cycles for valid data to be asserted. Furthermore,
-    //the 65C816 can preempt our PSRAM accesses. So this logic will reset that
-    //counter if our wait gets preempted. All you have to do is wait for the ctr
-    //to reach zero again and then run your logic.
-    if (!sfc_rom_rd & darb_psram_ctr > 0) begin
-        darb_psram_ctr <= darb_psram_ctr - 1;
-    end else if (sfc_rom_rd & darb_psram_ctr > 0) begin
-        //We don't need to change psram_addr, we just need to reset our ctr and
-        //let the countdown logic reassert psram_addr...
-        darb_psram_ctr <= DARB_PSRAM_TIMING;
-    end
-end
-
-//Internal DCU
-spc7110_dcu dcu (
-    .CLK(CLK),
-    .dcu_init(dcu_init),
-    .dcu_init_mode(dcu_init_mode),
-    .dcu_datarom_wait(dcu_datarom_wait),
-    .dcu_datarom_rd(dcu_datarom_rd),
-    .dcu_datarom_data(dcu_datarom_data),
-    .dcu_ob_wait(dcu_ob_wait),
-    .dcu_ob_wr(dcu_ob_wr),
-    .dcu_ob_data(dcu_ob_data)
-);
-
-//PSRAM Service
-always @(posedge CLK) begin
+    
     //Priority 0 on Port B: Servicing PSRAM buffering.
     if (darb_state == DARB_STATE_READY && darb_psram_ctr == 0) begin
         case (darb_psram_state)
@@ -383,20 +364,16 @@ always @(posedge CLK) begin
             DARB_PSRAM_QUEUE: begin
                 if (darb_decompress_ptr & 1) begin
                     //We only have one byte to write...
-                    buffer_pb_we <= 1;
-                    buffer_pb_en <= 1;
-                    buffer_pb_addr <= darb_inbuf_wrloc;
-                    buffer_pb_datain <= darb_psram_data & 8'hFF;
+                    darb_psram_pb_we <= 1;
+                    darb_psram_pb_datain <= darb_psram_data & 8'hFF;
                     
                     darb_psram_state <= DARB_PSRAM_INACTIVE;
                     darb_inbuf_wrloc <= darb_inbuf_wrloc + 1;
                     darb_decompress_ptr <= darb_decompress_ptr + 1;
                 end else begin
                     //Otherwise, two bytes. Write the correct one first...
-                    buffer_pb_we <= 1;
-                    buffer_pb_en <= 1;
-                    buffer_pb_addr <= darb_inbuf_wrloc;
-                    buffer_pb_datain <= darb_psram_data >> 8;
+                    darb_psram_pb_we <= 1;
+                    darb_psram_pb_datain <= darb_psram_data >> 8;
                     
                     darb_psram_state <= DARB_PSRAM_INACTIVE;
                     darb_inbuf_wrloc <= darb_inbuf_wrloc + 1;
@@ -405,46 +382,82 @@ always @(posedge CLK) begin
             end
         endcase
     end
+    
+    //PSRAM requires 7 master cycles for valid data to be asserted. Furthermore,
+    //the 65C816 can preempt our PSRAM accesses. So this logic will reset that
+    //counter if our wait gets preempted. All you have to do is wait for the ctr
+    //to reach zero again and then run your logic.
+    if (!sfc_rom_rd & darb_psram_ctr > 0) begin
+        darb_psram_ctr <= darb_psram_ctr - 1;
+    end else if (sfc_rom_rd & darb_psram_ctr > 0) begin
+        //We don't need to change psram_addr, we just need to reset our ctr and
+        //let the countdown logic reassert psram_addr...
+        darb_psram_ctr <= DARB_PSRAM_TIMING;
+    end
 end
+
+assign psram_addr = darb_psram_addr;
+assign darb_rom_rd = darb_psram_ctr != 0;
+
+//Internal DCU
+spc7110_dcu dcu (
+    .CLK(CLK),
+    .dcu_init(dcu_init),
+    .dcu_init_mode(dcu_init_mode),
+    .dcu_datarom_wait(dcu_datarom_wait),
+    .dcu_datarom_rd(dcu_datarom_rd),
+    .dcu_datarom_data(dcu_datarom_data),
+    .dcu_ob_wait(dcu_ob_wait),
+    .dcu_ob_wr(dcu_ob_wr),
+    .dcu_ob_data(dcu_ob_data)
+);
 
 //DCU Service
 assign dcu_datarom_wait = darb_inbuf_wrloc == darb_inbuf_rdloc | darb_psram_state == DARB_PSRAM_QUEUE | darb_bypass_dcu;
 assign dcu_ob_wait = darb_output_ctr != 0;
 assign dcu_datarom_data = buffer_pb_dataout;
 
+reg darb_dcuin_pb_wlock;
+
 always @(posedge CLK) begin
     //Priority 2 on Port B: Servicing DCU data reads.
-    if (darb_state == DARB_STATE_READY 
+    if ((darb_state == DARB_STATE_READY) 
         & dcu_datarom_rd
         & darb_inbuf_wrloc != darb_inbuf_rdloc
         & darb_psram_state != DARB_PSRAM_QUEUE
         & !darb_bypass_dcu) begin
         
-        buffer_pb_addr <= darb_inbuf_rdloc;
-        buffer_pb_we <= 0;
-        buffer_pb_en <= 1;
+        darb_dcuin_pb_wlock <= 1;
         darb_inbuf_rdloc <= darb_inbuf_rdloc + 1 & 10'h3FF;
+    end else begin
+        darb_dcuin_pb_wlock <= 0;
+    end
+    
+    //SNES is reading our own input buffer...
+    if (darb_bypass_dcu & darb_readport_enable) begin
+        darb_inbuf_rdloc <= darb_inbuf_rdloc + 1;
     end
 end
 
+reg darb_dcuout_pb_we;
+reg [7:0] darb_dcuout_pb_datain;
+
 always @(posedge CLK) begin
     //Priority 3 on Port B: Servicing DCU output, which is 4 bytes wide.
-    if (darb_state == DARB_STATE_READY & dcu_ob_wr) begin
+    if (dcu_ob_wr & (darb_state == DARB_STATE_READY)) begin
         darb_output_data <= dcu_ob_data;
         darb_output_ctr <= 1;
     end
     
     if (darb_state == DARB_STATE_READY & darb_output_ctr > 4) begin
-        buffer_pb_we <= 0;
-    end else if (darb_state == DARB_STATE_READY
+        darb_dcuout_pb_we <= 0;
+    end else if ((darb_state == DARB_STATE_READY)
                 & !dcu_datarom_rd
                 & darb_output_ctr > 0
                 & (darb_outbuf_wrloc + 1 & 11'h3FF) != darb_outbuf_rdloc
                 & darb_psram_state != DARB_PSRAM_QUEUE) begin
-        buffer_pb_addr <= darb_outbuf_wrloc | 11'h700;
-        buffer_pb_datain <= darb_output_data & 8'hFF;
-        buffer_pb_we <= 1;
-        buffer_pb_en <= 1;
+        darb_dcuout_pb_datain <= darb_output_data & 8'hFF;
+        darb_dcuout_pb_we <= 1;
         
         darb_outbuf_wrloc <= darb_outbuf_wrloc + 1;
         darb_output_ctr <= darb_output_ctr + 1;
@@ -452,12 +465,19 @@ always @(posedge CLK) begin
     end
 end
 
-//Offset / Length logic
-always @(posedge CLK) begin
-    if (darb_state == DARB_STATE_READY & darb_outbuf_wrloc != darb_outbuf_rdloc & darb_offset_ctr > 0) begin
-        darb_offset_ctr <= darb_offset_ctr - 1;
-        darb_outbuf_rdloc <= darb_outbuf_rdloc + 1;
-    end
-end
+//Block RAM Port B arbitration
+assign buffer_pb_we = darb_psram_pb_we ? 1
+                    : darb_dcuin_pb_wlock ? 0
+                    : darb_dcuout_pb_we ? 1
+                    : 0;
+                    
+assign buffer_pb_addr = darb_psram_pb_we ? darb_inbuf_wrloc
+                        : darb_dcuin_pb_wlock ? darb_inbuf_rdloc
+                        : darb_dcuout_pb_we ? darb_outbuf_wrloc | 11'h700
+                        : 0;
+                        
+assign buffer_pb_datain = darb_psram_pb_we ? darb_psram_pb_datain
+                          : darb_dcuout_pb_we ? darb_dcuout_pb_datain
+                          : 0;
 
 endmodule
