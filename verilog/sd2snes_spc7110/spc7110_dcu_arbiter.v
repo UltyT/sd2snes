@@ -148,6 +148,8 @@ parameter DARB_PORT_BYPASS   = 4'hB; //write 00 = bypass DCU, 02 = enable DCU
 parameter DARB_PORT_STATUS   = 4'hC;
 
 reg darb_should_begin_moderead;
+reg [15:0] darb_sfc_offset_ctr;
+reg [15:0] darb_sfc_length_ctr;
 
 always @(posedge sfc_wr) begin
     if (darb_sfc_enable) begin
@@ -169,19 +171,19 @@ always @(posedge sfc_wr) begin
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_OFFSET0: begin
-                darb_offset_ctr <= darb_offset_ctr & 16'hFF00 | sfc_data;
+                darb_sfc_offset_ctr <= darb_sfc_offset_ctr & 16'hFF00 | sfc_data;
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_OFFSET1: begin
-                darb_offset_ctr <= sfc_data << 8 | darb_offset_ctr & 16'h00FF;
+                darb_sfc_offset_ctr <= sfc_data << 8 | darb_sfc_offset_ctr & 16'h00FF;
                 darb_should_begin_moderead <= 1;
             end
             DARB_PORT_COUNTER0: begin
-                darb_length_ctr <= darb_length_ctr & 16'hFF00 | sfc_data;
+                darb_sfc_length_ctr <= darb_sfc_length_ctr & 16'hFF00 | sfc_data;
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_COUNTER1: begin
-                darb_length_ctr <= sfc_data << 8 | darb_length_ctr & 16'h00FF;
+                darb_sfc_length_ctr <= sfc_data << 8 | darb_sfc_length_ctr & 16'h00FF;
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_BYPASS: begin
@@ -202,8 +204,14 @@ assign buffer_pa_en = darb_sfc_enable ? (sfc_dcu_port == DARB_PORT_READ)
 reg sfc_rd_last;
 
 assign sfc_rd_posedge = sfc_rd & ~sfc_rd_last;
+assign sfc_data = buffer_pa_dataout | darb_output;
+
+reg darb_psram_pb_we;
+reg [7:0] darb_psram_pb_datain;
 
 always @(posedge CLK) begin
+    //65C816 read port service.
+    //We have to do it here or otherwise the Verilog synth complains
     if (sfc_rd_posedge & darb_sfc_enable) begin
         case (sfc_dcu_port)
             DARB_PORT_BASE0: begin
@@ -275,19 +283,14 @@ always @(posedge CLK) begin
     end
     
     sfc_rd_last <= sfc_rd;
-end
-
-assign sfc_data = buffer_pa_dataout | darb_output;
-
-//PSRAM logic, all of it...
-reg darb_psram_pb_we;
-reg [7:0] darb_psram_pb_datain;
-
-always @(posedge CLK) begin
+    
+    //This logic initializes the DCU buffers when it's time to start the DCU
     if (darb_should_begin_moderead) begin
         darb_state <= DARB_STATE_MODEREAD;
         darb_psram_ctr <= 0;
         darb_index_ptr <= darb_directory_base + darb_directory_index * 4;
+        darb_offset_ctr <= darb_sfc_offset_ctr;
+        darb_length_ctr <= darb_sfc_length_ctr;
     end
     
     if (darb_psram_ctr == 0) begin
