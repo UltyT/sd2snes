@@ -22,6 +22,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 module spc7110_dcu_arbiter(
     input CLK,
+    input RESET,
     
     //PSRAM is single-ported, and not quite fast enough to service both the SFC
     //and the DCU at the same time, so SFC reads take priority. We also send our
@@ -35,7 +36,8 @@ module spc7110_dcu_arbiter(
     input [3:0] sfc_dcu_port,
     input sfc_rd,
     input sfc_wr,
-    inout [7:0] sfc_data,
+    input [7:0] sfc_data_in,
+    output [7:0] sfc_data_out,
     
     //PSRAM control - for some reason we have a 16-bit data bus on sd2snes...
     input [15:0] psram_data,
@@ -155,42 +157,47 @@ always @(posedge sfc_wr) begin
     if (darb_sfc_enable) begin
         case (sfc_dcu_port)
             DARB_PORT_BASE0: begin
-                darb_directory_base <= darb_directory_base & 24'hFFFF00 | sfc_data;
+                darb_directory_base <= (darb_directory_base & 24'hFFFF00) | (sfc_data_in);
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_BASE1: begin
-                darb_directory_base <= darb_directory_base & 24'hFF00FF | sfc_data;
+                darb_directory_base <= (darb_directory_base & 24'hFF00FF) | (sfc_data_in << 8);
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_BASE2: begin
-                darb_directory_base <= darb_directory_base & 24'h00FFFF | sfc_data;
+                darb_directory_base <= (darb_directory_base & 24'h00FFFF) | (sfc_data_in << 16);
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_INDEX: begin
-                darb_directory_index <= sfc_data;
+                darb_directory_index <= sfc_data_in;
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_OFFSET0: begin
-                darb_sfc_offset_ctr <= darb_sfc_offset_ctr & 16'hFF00 | sfc_data;
+                darb_sfc_offset_ctr <= darb_sfc_offset_ctr & 16'hFF00 | sfc_data_in;
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_OFFSET1: begin
-                darb_sfc_offset_ctr <= sfc_data << 8 | darb_sfc_offset_ctr & 16'h00FF;
+                darb_sfc_offset_ctr <= sfc_data_in << 8 | darb_sfc_offset_ctr & 16'h00FF;
                 darb_should_begin_moderead <= 1;
             end
             DARB_PORT_COUNTER0: begin
-                darb_sfc_length_ctr <= darb_sfc_length_ctr & 16'hFF00 | sfc_data;
+                darb_sfc_length_ctr <= darb_sfc_length_ctr & 16'hFF00 | sfc_data_in;
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_COUNTER1: begin
-                darb_sfc_length_ctr <= sfc_data << 8 | darb_sfc_length_ctr & 16'h00FF;
+                darb_sfc_length_ctr <= sfc_data_in << 8 | darb_sfc_length_ctr & 16'h00FF;
                 darb_should_begin_moderead <= 0;
             end
             DARB_PORT_BYPASS: begin
-                darb_bypass_dcu <= ~((sfc_data & 8'h02) >> 1);
+                darb_bypass_dcu <= ~((sfc_data_in & 8'h02) >> 1);
                 darb_should_begin_moderead <= 0;
             end
         endcase
+    end else if (RESET) begin
+        darb_directory_base <= 0;
+        darb_sfc_offset_ctr <= 0;
+        darb_sfc_length_ctr <= 0;
+        darb_bypass_dcu <= 0;
     end
 end
 
@@ -204,7 +211,7 @@ assign buffer_pa_en = darb_sfc_enable ? (sfc_dcu_port == DARB_PORT_READ)
 reg sfc_rd_last;
 
 assign sfc_rd_posedge = sfc_rd & ~sfc_rd_last;
-assign sfc_data = buffer_pa_dataout | darb_output;
+assign sfc_data_out = buffer_pa_dataout | darb_output;
 
 reg darb_psram_pb_we;
 reg [7:0] darb_psram_pb_datain;
@@ -312,6 +319,8 @@ always @(posedge CLK) begin
                 darb_state_ctr <= 1;
             end
             DARB_STATE_ADDRREAD: begin
+                dcu_init <= 0;
+                
                 if (darb_state_ctr > 0) begin
                     if (darb_psram_addr & 1 == 0 && darb_state_ctr != 3) begin
                         //16-bit ld
@@ -338,8 +347,14 @@ always @(posedge CLK) begin
                     //Tell the PSRAM buffering logic it can start filling buffer
                     darb_psram_state <= DARB_PSRAM_INACTIVE;
                     darb_psram_ctr <= 0;
+                end else if (darb_state_ctr > 0) begin
+                    darb_psram_addr <= darb_index_ptr >> 1;
+                    darb_psram_ctr <= DARB_PSRAM_TIMING;
                 end else begin
                     darb_psram_addr <= darb_index_ptr >> 1;
+                    darb_psram_ctr <= DARB_PSRAM_TIMING;
+                    
+                    darb_state_ctr <= 1;
                 end
             end
         endcase
@@ -349,6 +364,8 @@ always @(posedge CLK) begin
     if (darb_state == DARB_STATE_READY && darb_psram_ctr == 0) begin
         case (darb_psram_state)
             DARB_PSRAM_INACTIVE: begin
+                darb_psram_pb_we <= 0;
+                
                 //NOTE: Because PSRAM is 16b wide we need 2 free bytes of inbuf.
                 //Otherwise we risk accidentally filling the ring buffer, which
                 //will also empty it.
@@ -361,6 +378,7 @@ always @(posedge CLK) begin
                 end
             end
             DARB_PSRAM_STORE: begin
+                darb_psram_pb_we <= 0;
                 darb_psram_data <= psram_data;
                 darb_psram_state <= DARB_PSRAM_QUEUE;
             end
