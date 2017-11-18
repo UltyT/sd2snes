@@ -29,6 +29,8 @@ module spi(
   output param_ready,
   output [7:0] cmd_data,
   output [7:0] param_data,
+  output endmessage,
+  output startmessage,
   input [7:0] input_data,
   output [31:0] byte_cnt,
   output [2:0] bit_cnt
@@ -47,6 +49,8 @@ wire SSEL_inactive = SSELr[1];
 wire SSEL_active = ~SSELr[1];  // SSEL is active low
 wire SSEL_startmessage = (SSELr[2:1]==2'b10);  // message starts at falling edge
 wire SSEL_endmessage = (SSELr[2:1]==2'b01);  // message stops at rising edge
+assign endmessage = SSEL_endmessage;
+assign startmessage = SSEL_startmessage;
 
 // bit count for one SPI byte + byte count for the message
 reg [2:0] bitcnt;
@@ -69,10 +73,10 @@ always @(posedge SCK) begin
 end
 
 always @(posedge SCK) begin
-  if(~SSELSCKr[1]) begin
+  if(~SSELSCKr[1])
     byte_data_received <= {byte_data_received[6:0], MOSI};
-  end
-  if(~SSELSCKr[1] && bitcnt==3'b111) byte_received <= 1'b1;
+  if(~SSELSCKr[1] && bitcnt==3'b111)
+    byte_received <= 1'b1;
   else byte_received <= 1'b0;
 end
 
@@ -81,11 +85,10 @@ end
 //wire byte_received_sync = (byte_received_r[2:1] == 2'b01);
 
 always @(posedge clk) begin
-  if(SSEL_inactive) begin
+  if(SSEL_inactive)
     byte_cnt_r <= 16'h0000;
-  end else if(byte_received_sync) begin
+  else if(byte_received_sync)
     byte_cnt_r <= byte_cnt_r + 16'h0001;
-  end
 end
 
 reg [7:0] byte_data_sent;
