@@ -40,6 +40,7 @@ module address(
   output branch1_enable,
   output branch2_enable,
   output spc7110_dcu_enable,
+  output spc7110_dcu_ba50mirror
 );
 
 parameter [2:0]
@@ -51,6 +52,7 @@ parameter [2:0]
 ;
 
 wire [23:0] SRAM_SNES_ADDR;
+wire spc7110_iop_enable;
 
 /* currently supported mappers:
    Index     Mapper
@@ -67,7 +69,7 @@ wire [23:0] SRAM_SNES_ADDR;
 /* SPC7110: Coproc I/O @ $00-FF:$4800-4842
             SRAM       @ $30-3F:$6000-7fff (Also mirrored to $B0-$BF)
             DCU Mirror @    $50:$0000-FFFF (One @*%*ing register wtf?!)
-            PROM       @ $C0-CF:$0000-FFFF (HiROM organization)
+            PROM       @ $C0-CF:$0000-FFFF (e.g. HiROM but sliced into banks)
             DROM       @ $D0-DF:$0000-FFFF (Bank-switchable)
             DROM       @ $E0-EF:$0000-FFFF (Bank-switchable)
             DROM       @ $F0-FF:$0000-FFFF (Bank-switchable) */
@@ -96,7 +98,7 @@ assign IS_SAVERAM = SAVERAM_MASK[0]
                       ? (&SNES_ADDR[23:20])
                       : 1'b0));
 
-wire [2:0] SNES_PSRAM_BANK = bsx_regs[2] ? SNES_ADDR[21:19] : SNES_ADDR[22:20];
+wire [2:0] SNES_PSRAM_BANK = SNES_ADDR[22:20];
 
 assign IS_WRITABLE = IS_SAVERAM;
 
@@ -165,4 +167,9 @@ assign nmicmd_enable = (SNES_ADDR == 24'h002BF2);
 assign return_vector_enable = (SNES_ADDR == 24'h002A5A);
 assign branch1_enable = (SNES_ADDR == 24'h002A13);
 assign branch2_enable = (SNES_ADDR == 24'h002A4D);
+
+assign spc7110_iop_enable = (SNES_ADDR[15:8] == 8'h42);
+
+assign spc7110_dcu_enable = spc7110_iop_enable & SNES_ADDR[7:4] == 4'h0;
+assign spc7110_dcu_ba50mirror = SNES_ADDR[23:16] == 8'h50;
 endmodule
