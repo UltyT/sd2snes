@@ -444,8 +444,8 @@ address snes_addr(
 );
 
 wire darb_rom_rd;
-wire darb_snes_out;
-wire darb_rom_addr;
+wire [7:0] darb_snes_out;
+wire [22:0] darb_rom_addr;
 
 spc7110_dcu_arbiter snes_dcu(
     .CLK(CLK2),

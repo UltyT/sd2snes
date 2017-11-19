@@ -211,7 +211,7 @@ assign buffer_pa_en = darb_sfc_enable ? (sfc_dcu_port == DARB_PORT_READ)
 reg sfc_rd_last;
 
 assign sfc_rd_posedge = sfc_rd & ~sfc_rd_last;
-assign sfc_data_out = buffer_pa_dataout | darb_output;
+assign sfc_data_out = buffer_pa_en ? buffer_pa_dataout : darb_output;
 
 reg darb_psram_pb_we;
 reg [7:0] darb_psram_pb_datain;
@@ -303,7 +303,12 @@ always @(posedge CLK) begin
     if (darb_psram_ctr == 0) begin
         case (darb_state)
             DARB_STATE_MODEREAD: begin
-                if (darb_state_ctr > 0) begin
+                if (darb_state_ctr == 0) begin
+                    darb_psram_addr <= darb_index_ptr >> 1;
+                    darb_psram_ctr <= DARB_PSRAM_TIMING;
+
+                    darb_state_ctr <= 1;
+                end else if (darb_state_ctr > 0) begin
                     dcu_init <= 1;
                     dcu_init_mode <= psram_data >> (darb_index_ptr & 1'b1 ? 8 : 0);
                     
@@ -312,33 +317,9 @@ always @(posedge CLK) begin
                     darb_state <= DARB_STATE_ADDRREAD;
                     darb_state_ctr <= 0;
                 end
-                
-                darb_psram_addr <= darb_index_ptr >> 1;
-                darb_psram_ctr <= DARB_PSRAM_TIMING;
-                
-                darb_state_ctr <= 1;
             end
             DARB_STATE_ADDRREAD: begin
                 dcu_init <= 0;
-                
-                if (darb_state_ctr > 0) begin
-                    if (darb_psram_addr & 1 == 0 && darb_state_ctr != 3) begin
-                        //16-bit ld
-                        darb_decompress_ptr <= darb_decompress_ptr << 16 | psram_data >> 8 | psram_data & 8'hFF;
-                        darb_index_ptr <= darb_index_ptr + 2;
-                        darb_state_ctr <= darb_state_ctr + 2;
-                    end else if (darb_state_ctr != 3) begin
-                        //8-bit ld, high byte
-                        darb_decompress_ptr <= darb_decompress_ptr << 8 | psram_data & 8'hFF;
-                        darb_index_ptr <= darb_index_ptr + 1;
-                        darb_state_ctr <= darb_state_ctr + 1;
-                    end else if (darb_psram_addr & 1 == 0) begin
-                        //8-bit ld, low byte
-                        darb_decompress_ptr <= darb_decompress_ptr << 8 | psram_data >> 8;
-                        darb_index_ptr <= darb_index_ptr + 1;
-                        darb_state_ctr <= darb_state_ctr + 1;
-                    end
-                end
                 
                 if (darb_state_ctr > 3) begin
                     darb_state <= DARB_STATE_READY;
@@ -348,8 +329,31 @@ always @(posedge CLK) begin
                     darb_psram_state <= DARB_PSRAM_INACTIVE;
                     darb_psram_ctr <= 0;
                 end else if (darb_state_ctr > 0) begin
-                    darb_psram_addr <= darb_index_ptr >> 1;
-                    darb_psram_ctr <= DARB_PSRAM_TIMING;
+                    if (darb_index_ptr & 1 == 0 && darb_state_ctr != 3) begin
+                        //16-bit ld
+                        darb_decompress_ptr <= darb_decompress_ptr << 16 | psram_data >> 8 | psram_data & 8'hFF;
+                        darb_index_ptr <= darb_index_ptr + 2;
+                        darb_state_ctr <= darb_state_ctr + 2;
+                        
+                        darb_psram_addr <= (darb_index_ptr + 2) >> 1;
+                        darb_psram_ctr <= DARB_PSRAM_TIMING;
+                    end else if (darb_state_ctr != 3) begin
+                        //8-bit ld, high byte
+                        darb_decompress_ptr <= darb_decompress_ptr << 8 | psram_data & 8'hFF;
+                        darb_index_ptr <= darb_index_ptr + 1;
+                        darb_state_ctr <= darb_state_ctr + 1;
+                        
+                        darb_psram_addr <= (darb_index_ptr + 1) >> 1;
+                        darb_psram_ctr <= DARB_PSRAM_TIMING;
+                    end else if (darb_index_ptr & 1 == 0) begin
+                        //8-bit ld, low byte
+                        darb_decompress_ptr <= darb_decompress_ptr << 8 | psram_data >> 8;
+                        darb_index_ptr <= darb_index_ptr + 1;
+                        darb_state_ctr <= darb_state_ctr + 1;
+                        
+                        darb_psram_addr <= (darb_index_ptr + 1) >> 1;
+                        darb_psram_ctr <= DARB_PSRAM_TIMING;
+                    end
                 end else begin
                     darb_psram_addr <= darb_index_ptr >> 1;
                     darb_psram_ctr <= DARB_PSRAM_TIMING;
@@ -468,10 +472,13 @@ always @(posedge CLK) begin
     if (dcu_ob_wr & (darb_state == DARB_STATE_READY)) begin
         darb_output_data <= dcu_ob_data;
         darb_output_ctr <= 1;
+    end else if (darb_state != DARB_STATE_READY) begin
+        darb_output_ctr <= 0;
     end
     
     if (darb_state == DARB_STATE_READY & darb_output_ctr > 4) begin
         darb_dcuout_pb_we <= 0;
+        darb_output_ctr <= 0;
     end else if ((darb_state == DARB_STATE_READY)
                 & !dcu_datarom_rd
                 & darb_output_ctr > 0

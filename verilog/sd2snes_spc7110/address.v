@@ -170,6 +170,6 @@ assign branch2_enable = (SNES_ADDR == 24'h002A4D);
 
 assign spc7110_iop_enable = (SNES_ADDR[15:8] == 8'h42);
 
-assign spc7110_dcu_enable = spc7110_iop_enable & SNES_ADDR[7:4] == 4'h0;
-assign spc7110_dcu_ba50mirror = SNES_ADDR[23:16] == 8'h50;
+assign spc7110_dcu_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h0);
+assign spc7110_dcu_ba50mirror = (SNES_ADDR[23:16] == 8'h50);
 endmodule
