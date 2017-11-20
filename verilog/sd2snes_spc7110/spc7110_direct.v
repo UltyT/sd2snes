@@ -57,6 +57,8 @@ parameter DIRECT_STEP1   = 4'h7;
 parameter DIRECT_MODE    = 4'h8;
 parameter DIRECT_READSET = 4'hA;
 
+parameter DIRECT_PROGROM_SIZE = 24'h100000;
+
 wire direct_use_step = direct_mode[0];
 wire direct_use_offset = direct_mode[1];
 wire direct_use_signed_step = direct_mode[2];
@@ -79,7 +81,10 @@ reg direct_mmio_en;
 reg [22:0] direct_psram_addr;
 
 assign sfc_data_out = direct_mmio_en ? direct_mmio_out : psram_data;
-assign psram_addr = direct_psram_addr;
+//TODO: Account for small data ROM size with masking...
+//SPC7110 is natively single-ROM, so we have to add the program ROM size...
+//Sorry byuu
+assign psram_addr = direct_psram_addr + DIRECT_PROGROM_SIZE;
 assign direct_rom_rd = !direct_mmio_en;
 
 always @(posedge CLK) begin
@@ -102,9 +107,23 @@ always @(posedge CLK) begin
             end
             DIRECT_OFFSET0: begin
                 direct_offset <= (direct_offset & 16'hFF00) | sfc_data_in;
+                
+                //TODO: Isn't this supposed to add only the 8 bits?
+                //As opposed to "add when you write the lower 8 bits...
+                if (direct_add_8b_offset & direct_use_signed_offset) begin
+                    direct_base <= direct_base + direct_signed_offset;
+                end else if (direct_add_8b_offset) begin
+                    direct_base <= direct_base + direct_offset;
+                end
             end
             DIRECT_OFFSET1: begin
                 direct_offset <= (direct_offset & 16'h00FF) | (sfc_data_in << 8);
+                
+                if (direct_add_16b_offset & direct_use_signed_offset) begin
+                    direct_base <= direct_base + direct_signed_offset;
+                end else if (direct_add_16b_offset) begin
+                    direct_base <= direct_base + direct_offset;
+                end
             end
             DIRECT_STEP0: begin
                 direct_step <= (direct_step & 16'hFF00) | sfc_data_in;
@@ -196,6 +215,11 @@ always @(posedge CLK) begin
                     end else if (direct_add_16b_offset_481A) begin
                         direct_base <= direct_base + direct_offset;
                     end
+                    
+                    //TODO: snes9x will add offset to itself if "Apply Step" is
+                    //set to write to the offset, even though fullsnes and higan
+                    //claim otherwise. Further testing is required to determine
+                    //if $4818:b4 matters or not...
                 end else begin
                     direct_mmio_en <= 1;
                     direct_mmio_out <= 8'h00; //TODO: Open bus?
