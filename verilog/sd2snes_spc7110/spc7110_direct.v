@@ -84,7 +84,7 @@ assign sfc_data_out = direct_mmio_en ? direct_mmio_out : psram_data;
 //TODO: Account for small data ROM size with masking...
 //SPC7110 is natively single-ROM, so we have to add the program ROM size...
 //Sorry byuu
-assign psram_addr = direct_psram_addr + DIRECT_PROGROM_SIZE;
+assign psram_addr = direct_psram_addr + (DIRECT_PROGROM_SIZE >> 1);
 assign direct_rom_rd = !direct_mmio_en;
 
 always @(posedge CLK) begin

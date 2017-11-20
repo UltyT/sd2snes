@@ -421,7 +421,9 @@ always @(posedge CLK) begin
     end
 end
 
-assign psram_addr = darb_psram_addr;
+parameter DIRECT_PROGROM_SIZE = 24'h100000;
+
+assign psram_addr = darb_psram_addr + (DIRECT_PROGROM_SIZE >> 1);
 assign darb_rom_rd = darb_psram_ctr != 0;
 
 //Internal DCU
