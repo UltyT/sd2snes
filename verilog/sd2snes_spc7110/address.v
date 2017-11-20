@@ -40,7 +40,8 @@ module address(
   output branch1_enable,
   output branch2_enable,
   output spc7110_dcu_enable,
-  output spc7110_dcu_ba50mirror
+  output spc7110_dcu_ba50mirror,
+  output spc7110_direct_enable
 );
 
 parameter [2:0]
@@ -172,4 +173,6 @@ assign spc7110_iop_enable = (SNES_ADDR[15:8] == 8'h42);
 
 assign spc7110_dcu_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h0);
 assign spc7110_dcu_ba50mirror = (SNES_ADDR[23:16] == 8'h50);
+assign spc7110_direct_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h1);
+
 endmodule

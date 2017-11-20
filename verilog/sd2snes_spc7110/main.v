@@ -440,17 +440,37 @@ address snes_addr(
   .r213f_enable(r213f_enable),
   //SPC7110
   .spc7110_dcu_enable(spc7110_dcu_enable),
-  .spc7110_dcu_ba50mirror(spc7110_dcu_ba50mirror)
+  .spc7110_dcu_ba50mirror(spc7110_dcu_ba50mirror),
+  .spc7110_direct_enable(spc7110_direct_enable)
 );
 
+wire direct_rom_rd;
+wire [7:0] direct_snes_out;
+wire [22:0] direct_rom_addr;
+
+spc7110_direct snes_spc7110_direct(
+    .CLK(CLK2),
+    .RESET(RST),
+    .direct_rom_rd(direct_rom_rd),
+    .direct_sfc_enable(spc7110_direct_enable),
+    .sfc_direct_port(SNES_ADDR[3:0]),
+    .sfc_rd(SNES_RD_start),
+    .sfc_wr(SNES_WR_end),
+    .sfc_data_in(SNES_DATA),
+    .sfc_data_out(direct_snes_out),
+    .psram_data(ROM_DATA),
+    .psram_addr(direct_rom_addr)
+);
+
+wire darb_wait = IS_ROM | direct_rom_rd;
 wire darb_rom_rd;
 wire [7:0] darb_snes_out;
 wire [22:0] darb_rom_addr;
 
-spc7110_dcu_arbiter snes_dcu(
+spc7110_dcu_arbiter snes_spc7110_dcu(
     .CLK(CLK2),
     .RESET(RST),
-    .sfc_rom_rd(IS_ROM),
+    .sfc_rom_rd(darb_wait),
     .darb_rom_rd(darb_rom_rd),
     .darb_sfc_enable(spc7110_dcu_enable),
     .darb_decomp_mirror(spc7110_dcu_ba50mirror),
@@ -529,6 +549,7 @@ assign SNES_DATA = (r213f_enable & ~SNES_PARD & ~r213f_forceread) ? r213fr
                    :(~SNES_READ ^ (r213f_forceread & r213f_enable & ~SNES_PARD))
                                 ? (srtc_enable ? SRTC_SNES_DATA_OUT
                                   :msu_enable ? MSU_SNES_DATA_OUT
+                                  :spc7110_direct_enable ? direct_snes_out
                                   :spc7110_dcu_enable ? darb_snes_out
                                   :spc7110_dcu_ba50mirror ? darb_snes_out
                                   :(cheat_hit & ~feat_cmd_unlock) ? cheat_data_out
@@ -550,7 +571,11 @@ wire MCU_RD_HIT = |(STATE & ST_MCU_RD_ADDR);
 wire MCU_HIT = MCU_WR_HIT | MCU_RD_HIT;
 
 //TODO: Is this the correct way to wire up coprocessor ROM access?
-assign ROM_ADDR  = (SD_DMA_TO_ROM) ? MCU_ADDR[23:1] : MCU_HIT ? ROM_ADDRr[23:1] : IS_ROM ? MAPPED_SNES_ADDR[23:1] : darb_rom_addr;
+assign ROM_ADDR  = (SD_DMA_TO_ROM) ? MCU_ADDR[23:1]
+                    : MCU_HIT ? ROM_ADDRr[23:1]
+                    : IS_ROM ? MAPPED_SNES_ADDR[23:1]
+                    : direct_rom_rd ? direct_rom_addr
+                    : darb_rom_addr;
 assign ROM_ADDR0 = (SD_DMA_TO_ROM) ? MCU_ADDR[0] : MCU_HIT ? ROM_ADDRr[0] : MAPPED_SNES_ADDR[0];
 
 reg[17:0] SNES_DEAD_CNTr;
