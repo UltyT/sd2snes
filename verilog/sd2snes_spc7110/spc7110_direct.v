@@ -70,20 +70,19 @@ wire direct_add_16b_offset = !direct_mode[5] & direct_mode[6];
 wire direct_add_16b_offset_481A = direct_mode[5] & direct_mode[6];
 
 //If sign extension is enabled, these wires will be used instead of the regs
-wire [23:0] direct_signed_step = {8{direct_step[15]}, direct_step[15:0]};
-wire [23:0] direct_signed_offset = {8{direct_offset[15]}, direct_offset[15:0]};
+wire [23:0] direct_signed_step = { {8{direct_step[15]}}, direct_step[15:0] };
+wire [23:0] direct_signed_offset = { {8{direct_offset[15]}}, direct_offset[15:0] };
 
 reg [7:0] direct_mmio_out;
 reg direct_mmio_en;
 
 reg [22:0] direct_psram_addr;
 
-assign [7:0] sfc_data_out = direct_mmio_en ? direct_mmio_out
-                          : psram_data;
-assign [22:0] psram_addr = direct_psram_addr;
+assign sfc_data_out = direct_mmio_en ? direct_mmio_out : psram_data;
+assign psram_addr = direct_psram_addr;
 assign direct_rom_rd = !direct_mmio_en;
 
-always (@posedge CLK) begin
+always @(posedge CLK) begin
     if (RESET) begin
         direct_mmio_en <= 1; //prevent locking DCU/hogging PSRAM addr bus
     end else if (direct_sfc_enable & sfc_wr) begin
