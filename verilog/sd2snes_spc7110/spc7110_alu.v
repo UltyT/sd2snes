@@ -103,9 +103,11 @@ reg [15:0] alu_divisor;
 
 wire [31:0] alu_sdiv_quotient;
 wire [15:0] alu_sdiv_modulo;
+wire alu_sdiv_rfd;
 
 spc7110_alu_sdiv alu_sdiv(
     .clk(CLK),
+    .rfd(alu_sdiv_rfd),
     .dividend(alu_dividend),
     .divisor(alu_divisor),
     .quotient(alu_sdiv_quotient),
@@ -114,16 +116,20 @@ spc7110_alu_sdiv alu_sdiv(
 
 wire [31:0] alu_udiv_quotient;
 wire [15:0] alu_udiv_modulo;
+wire alu_udiv_rfd;
 
 spc7110_alu_udiv alu_udiv(
     .clk(CLK),
+    .rfd(alu_udiv_rfd),
     .dividend(alu_dividend),
     .divisor(alu_divisor),
     .quotient(alu_udiv_quotient),
     .fractional(alu_udiv_modulo)
 );
 
-//This output is NOT STABLE until you have counted LATENCY clocks.
+//This output is NOT STABLE until you have counted LATENCY clocks AFTER the RFD.
+reg alu_rfd_seen;
+wire alu_rfd = alu_signed_maths ? alu_sdiv_rfd : alu_udiv_rfd;
 wire [31:0] alu_quotient = alu_signed_maths ? alu_sdiv_quotient : alu_udiv_quotient;
 wire [15:0] alu_modulo = alu_signed_maths ? alu_sdiv_modulo : alu_udiv_modulo;
 
@@ -174,6 +180,7 @@ always @(posedge CLK) begin
                 alu_divisor <= alu_next_divisor;
                 alu_result_ctr <= alu_signed_maths ? ALU_SDIV_LATENCY : ALU_UDIV_LATENCY;
                 alu_lastop_division <= 1;
+                alu_rfd_seen <= 0;
             end
             ALU_PORT_RESET: begin
                 alu_next_arga <= 0;
@@ -249,7 +256,11 @@ always @(posedge CLK) begin
             alu_last_modulo <= alu_lastop_division ? alu_modulo : 0;
         end
         
-        alu_result_ctr <= alu_result_ctr - 1;
+        //We have to wait for one RFD pulse before counting down our latency.
+        if (alu_rfd_seen | alu_rfd) begin
+            alu_result_ctr <= alu_result_ctr - 1;
+            alu_rfd_seen <= 1;
+        end
     end
     
     if (RESET) begin
@@ -264,6 +275,8 @@ always @(posedge CLK) begin
         alu_multiplier <= 0;
         alu_dividend <= 0;
         alu_divisor <= 0;
+        
+        alu_rfd_seen <= 0;
         
         alu_last_result <= 0;
         alu_last_modulo <= 0;
