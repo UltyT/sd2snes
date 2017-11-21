@@ -42,7 +42,12 @@ module address(
   output spc7110_dcu_enable,
   output spc7110_dcu_ba50mirror,
   output spc7110_direct_enable,
-  output spc7110_alu_enable
+  output spc7110_alu_enable,
+  output spc7110_banked_enable,
+  input spc7110_sram_enable,
+  input [2:0] spc7110_blockd,
+  input [2:0] spc7110_blocke,
+  input [2:0] spc7110_blockf
 );
 
 parameter [2:0]
@@ -104,22 +109,20 @@ wire [2:0] SNES_PSRAM_BANK = SNES_ADDR[22:20];
 
 assign IS_WRITABLE = IS_SAVERAM;
 
-/* BSX regs:
- Index  Function
-    1   0=map flash to ROM area; 1=map PRAM to ROM area
-    2   1=HiROM; 0=LoROM
-    3   1=Mirror PRAM @60-6f:0000-ffff
-    5   1=DO NOT mirror PRAM @40-4f:0000-ffff
-    6   1=DO NOT mirror PRAM @50-5f:0000-ffff
-    7   1=map BSX cartridge ROM @00-1f:8000-ffff
-    8   1=map BSX cartridge ROM @80-9f:8000-ffff
-*/
+wire IS_PROM = !SNES_ADDR[21] & !SNES_ADDR[20];
+wire IS_DROM_D = !SNES_ADDR[21] & SNES_ADDR[20];
+wire IS_DROM_E = SNES_ADDR[21] & !SNES_ADDR[20];
+wire IS_DROM_F = SNES_ADDR[21] & SNES_ADDR[20];
 
 assign SRAM_SNES_ADDR = ((MAPPER == 3'b000)
                           ?(IS_SAVERAM
                             ? 24'hE00000 + ({SNES_ADDR[20:16], SNES_ADDR[12:0]}
                                             & SAVERAM_MASK)
-                            : ({1'b0, SNES_ADDR[22:0]} & ROM_MASK))
+                            : IS_PROM ? ({3'b0, SNES_ADDR[20:0]} & ROM_MASK)
+                            : IS_DROM_D ? (({(spc7110_blockd + 1), SNES_ADDR[20:0]}) & ROM_MASK)
+                            : IS_DROM_E ? (({(spc7110_blocke + 1), SNES_ADDR[20:0]}) & ROM_MASK)
+                            : IS_DROM_F ? (({(spc7110_blockf + 1), SNES_ADDR[20:0]}) & ROM_MASK)
+                            : 24'h000000) //this should never happen
 
                           :(MAPPER == 3'b001)
                           ?(IS_SAVERAM
@@ -170,11 +173,12 @@ assign return_vector_enable = (SNES_ADDR == 24'h002A5A);
 assign branch1_enable = (SNES_ADDR == 24'h002A13);
 assign branch2_enable = (SNES_ADDR == 24'h002A4D);
 
-assign spc7110_iop_enable = (SNES_ADDR[15:8] == 8'h42);
+assign spc7110_iop_enable = featurebits[FEAT_SPC7110] & (SNES_ADDR[15:8] == 8'h42);
 
 assign spc7110_dcu_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h0);
-assign spc7110_dcu_ba50mirror = (SNES_ADDR[23:16] == 8'h50);
+assign spc7110_dcu_ba50mirror = featurebits[FEAT_SPC7110] & (SNES_ADDR[23:16] == 8'h50);
 assign spc7110_direct_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h1);
 assign spc7110_alu_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h2);
+assign spc7110_banked_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h3);
 
 endmodule

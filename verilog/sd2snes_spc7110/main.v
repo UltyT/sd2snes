@@ -442,7 +442,11 @@ address snes_addr(
   .spc7110_dcu_enable(spc7110_dcu_enable),
   .spc7110_dcu_ba50mirror(spc7110_dcu_ba50mirror),
   .spc7110_direct_enable(spc7110_direct_enable),
-  .spc7110_alu_enable(spc7110_alu_enable)
+  .spc7110_alu_enable(spc7110_alu_enable),
+  .spc7110_banked_enable(spc7110_banked_enable),
+  .spc7110_blockd(spc7110_blockd),
+  .spc7110_blocke(spc7110_blocke),
+  .spc7110_blockf(spc7110_blockf)
 );
 
 wire direct_rom_rd;
@@ -495,6 +499,23 @@ spc7110_alu snes_spc7110_alu(
     .sfc_wr(SNES_WR_end),
     .sfc_data_in(SNES_DATA),
     .sfc_data_out(alu_snes_out)
+);
+
+wire [7:0] banked_snes_out;
+
+spc7110_banked snes_spc7110_banked(
+    .CLK(CLK2),
+    .RESET(RST),
+    .banked_sfc_enable(spc7110_banked_enable),
+    .sfc_banked_port(SNES_ADDR[3:0]),
+    .sfc_rd(SNES_RD_start),
+    .sfc_wr(SNES_WR_end),
+    .sfc_data_in(SNES_DATA),
+    .sfc_data_out(banked_snes_out),
+    .sram_enable(spc7110_sram_enable),
+    .block_dn_select(spc7110_blockd),
+    .block_en_select(spc7110_blocke),
+    .block_fn_select(spc7110_blockf)
 );
 
 reg pad_latch = 0;
@@ -563,6 +584,7 @@ assign SNES_DATA = (r213f_enable & ~SNES_PARD & ~r213f_forceread) ? r213fr
                    :(~SNES_READ ^ (r213f_forceread & r213f_enable & ~SNES_PARD))
                                 ? (srtc_enable ? SRTC_SNES_DATA_OUT
                                   :msu_enable ? MSU_SNES_DATA_OUT
+                                  :spc7110_banked_enable ? banked_snes_out
                                   :spc7110_alu_enable ? alu_snes_out
                                   :spc7110_direct_enable ? direct_snes_out
                                   :spc7110_dcu_enable ? darb_snes_out
