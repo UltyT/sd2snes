@@ -232,7 +232,7 @@ void smc_id(snes_romprops_t* props) {
     case 0x2a: /* SPC7110 */
       if(header->carttype == 0xf5 || header->carttype == 0xf9) {
         props->has_spc7110 = 1;
-        props->fpga_conf = FPGA_CX4;
+        props->fpga_conf = FPGA_SPC7110;
       }
       break;
 
