@@ -5,6 +5,7 @@
 #include "config.h"
 #include "uart.h"
 #include "memory.h"
+#include "implicit_decl.h"
 #include "sort.h"
 
 /*

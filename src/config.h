@@ -109,4 +109,6 @@
 #define USB_CONNREG LPC_GPIO4
 #define USB_CONNBIT 28
 
+#define CONFIG_VERSION "0.1.7e"
+
 #endif

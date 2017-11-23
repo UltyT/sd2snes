@@ -9,6 +9,7 @@
 #include "yaml.h"
 #include "rtc.h"
 #include "snes.h"
+#include "implicit_decl.h"
 
 cfg_t CFG_DEFAULT = {
   .vidmode_menu = VIDMODE_60,

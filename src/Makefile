@@ -44,6 +44,8 @@ include $(CONFIG)
 # Directory for all generated files
 OBJDIR := obj$(CONFIGSUFFIX)
 
+INCDIR = include
+
 # Output format. (can be srec, ihex, binary)
 FORMAT = binary
 
@@ -147,9 +149,11 @@ CFLAGS += $(CPUFLAGS) -nostartfiles
 CFLAGS += -Wall -Wstrict-prototypes -Werror -Wno-strict-aliasing
 CFLAGS += -Wa,-adhlns=$(OBJDIR)/$(<:.c=.lst)
 CFLAGS += -I$(OBJDIR)
+CFLAGS += -I$(INCDIR)
 CFLAGS += $(patsubst %,-I%,$(EXTRAINCDIRS))
 CFLAGS += $(CSTANDARD)
 CFLAGS += -ffunction-sections -fdata-sections
+CFLAGS += -std=c99
 
 
 #---------------- Assembler Options ----------------

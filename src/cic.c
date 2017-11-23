@@ -3,6 +3,7 @@
 #include "config.h"
 #include "uart.h"
 #include "cic.h"
+#include "implicit_decl.h"
 
 char *cicstatenames[4] = { "CIC_OK", "CIC_FAIL", "CIC_PAIR", "CIC_SCIC" };
 char *cicstatefriendly[4] = {"Original or no CIC", "Original CIC (failed)", "SuperCIC enhanced", "SuperCIC detected, not used"};

@@ -36,6 +36,7 @@
 #include "led.h"
 #include "sort.h"
 #include "cfg.h"
+#include "implicit_decl.h"
 
 #include "timer.h"
 

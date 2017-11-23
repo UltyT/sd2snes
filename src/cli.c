@@ -47,6 +47,7 @@
 #include "cic.h"
 #include "xmodem.h"
 #include "rtc.h"
+#include "implicit_decl.h"
 
 #include "cli.h"
 

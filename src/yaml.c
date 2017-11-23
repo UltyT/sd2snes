@@ -8,6 +8,7 @@
 #include "ff.h"
 #include "fileops.h"
 #include "uart.h"
+#include "implicit_decl.h"
 
 yaml_state_t ystate;
 
