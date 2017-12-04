@@ -51,7 +51,7 @@ module address(
 );
 
 parameter [2:0]
-  FEAT_SPC7110 = 0,
+  FEAT_EPSONRTC = 0,
   FEAT_ST0010 = 1,
   FEAT_SRTC = 2,
   FEAT_MSU1 = 3,
@@ -173,10 +173,10 @@ assign return_vector_enable = (SNES_ADDR == 24'h002A5A);
 assign branch1_enable = (SNES_ADDR == 24'h002A13);
 assign branch2_enable = (SNES_ADDR == 24'h002A4D);
 
-assign spc7110_iop_enable = featurebits[FEAT_SPC7110] & (SNES_ADDR[15:8] == 8'h42);
+assign spc7110_iop_enable = (SNES_ADDR[15:8] == 8'h42);
 
 assign spc7110_dcu_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h0);
-assign spc7110_dcu_ba50mirror = featurebits[FEAT_SPC7110] & (SNES_ADDR[23:16] == 8'h50);
+assign spc7110_dcu_ba50mirror = (SNES_ADDR[23:16] == 8'h50);
 assign spc7110_direct_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h1);
 assign spc7110_alu_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h2);
 assign spc7110_banked_enable = spc7110_iop_enable & (SNES_ADDR[7:4] == 4'h3);
