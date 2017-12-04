@@ -72,28 +72,12 @@ module mcu_cmd(
   output [13:0] msu_ptr_out,
   output msu_reset_out,
 
-  // BS-X
-  output [7:0] bsx_regs_reset_out,
-  output [7:0] bsx_regs_set_out,
-  output bsx_regs_reset_we,
-
   // generic RTC
   output [55:0] rtc_data_out,
   output rtc_pgm_we,
 
   // S-RTC
   output srtc_reset,
-
-  // uPD77C25
-  output reg [23:0] dspx_pgm_data_out,
-  output reg [10:0] dspx_pgm_addr_out,
-  output reg dspx_pgm_we_out,
-
-  output reg [15:0] dspx_dat_data_out,
-  output reg [10:0] dspx_dat_addr_out,
-  output reg dspx_dat_we_out,
-
-  output reg dspx_reset_out,
 
   // feature enable
   output reg [7:0] featurebits_out,
@@ -118,9 +102,6 @@ module mcu_cmd(
 );
 
 initial begin
-  dspx_pgm_addr_out = 11'b00000000000;
-  dspx_dat_addr_out = 10'b0000000000;
-  dspx_reset_out = 1'b1;
   region_out = 0;
   SD_DMA_START_MID_BLOCK = 0;
   SD_DMA_END_MID_BLOCK = 0;
@@ -145,10 +126,6 @@ reg [5:0] msu_status_set_out_buf;
 reg [5:0] msu_status_reset_out_buf;
 reg msu_status_reset_we_buf = 0;
 reg MSU_RESET_OUT_BUF;
-
-reg [7:0] bsx_regs_set_out_buf;
-reg [7:0] bsx_regs_reset_out_buf;
-reg bsx_regs_reset_we_buf;
 
 reg [55:0] rtc_data_out_buf;
 reg rtc_pgm_we_buf;
@@ -354,18 +331,6 @@ always @(posedge clk) begin
           32'h9:
             rtc_pgm_we_buf <= 1'b0;
         endcase
-      8'he6:
-        case (spi_byte_cnt)
-          32'h2: begin
-            bsx_regs_set_out_buf <= param_data[7:0];
-          end
-          32'h3: begin
-            bsx_regs_reset_out_buf <= param_data[7:0];
-            bsx_regs_reset_we_buf <= 1'b1;
-          end
-          32'h4:
-            bsx_regs_reset_we_buf <= 1'b0;
-        endcase
       8'he7:
         case (spi_byte_cnt)
           32'h2: begin
@@ -375,37 +340,8 @@ always @(posedge clk) begin
             srtc_reset_buf <= 1'b0;
           end
         endcase
-      8'he8: begin// reset DSPx PGM+DAT address
-        case (spi_byte_cnt)
-          32'h2: begin
-            dspx_pgm_addr_out <= 11'b00000000000;
-            dspx_dat_addr_out <= 10'b0000000000;
-          end
-        endcase
-      end
-      8'he9:// write DSPx PGM w/ increment
-        case (spi_byte_cnt)
-          32'h2: dspx_pgm_data_out[23:16] <= param_data[7:0];
-          32'h3: dspx_pgm_data_out[15:8] <= param_data[7:0];
-          32'h4: dspx_pgm_data_out[7:0] <= param_data[7:0];
-          32'h5: dspx_pgm_we_out <= 1'b1;
-          32'h6: begin
-            dspx_pgm_we_out <= 1'b0;
-            dspx_pgm_addr_out <= dspx_pgm_addr_out + 1;
-          end
-        endcase
-      8'hea:// write DSPx DAT w/ increment
-        case (spi_byte_cnt)
-          32'h2: dspx_dat_data_out[15:8] <= param_data[7:0];
-          32'h3: dspx_dat_data_out[7:0] <= param_data[7:0];
-          32'h4: dspx_dat_we_out <= 1'b1;
-          32'h5: begin
-            dspx_dat_we_out <= 1'b0;
-            dspx_dat_addr_out <= dspx_dat_addr_out + 1;
-          end
-        endcase
-      8'heb: // control DSPx reset
-        dspx_reset_out <= param_data[0];
+      //8'heb: // TODO: Put SPC7110 into reset.
+        //spc7110_reset_out <= param_data[0];
       8'hec:
         begin // set DAC properties
           dac_vol_select_out <= param_data[2:0];
@@ -566,10 +502,6 @@ assign msu_status_reset_out = msu_status_reset_out_buf;
 assign msu_status_set_out = msu_status_set_out_buf;
 assign msu_reset_out = MSU_RESET_OUT_BUF;
 assign msu_ptr_out = MSU_PTR_OUT_BUF;
-
-assign bsx_regs_reset_we = bsx_regs_reset_we_buf;
-assign bsx_regs_reset_out = bsx_regs_reset_out_buf;
-assign bsx_regs_set_out = bsx_regs_set_out_buf;
 
 assign rtc_data_out = rtc_data_out_buf;
 assign rtc_pgm_we = rtc_pgm_we_buf;
