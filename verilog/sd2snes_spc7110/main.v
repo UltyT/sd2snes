@@ -438,6 +438,11 @@ address snes_addr(
   .srtc_enable(srtc_enable),
   //R213F
   .r213f_enable(r213f_enable),
+  .snescmd_enable(snescmd_enable),
+  .nmicmd_enable(nmicmd_enable),
+  .return_vector_enable(return_vector_enable),
+  .branch1_enable(branch1_enable),
+  .branch2_enable(branch2_enable),
   //SPC7110
   .spc7110_dcu_enable(spc7110_dcu_enable),
   .spc7110_dcu_ba50mirror(spc7110_dcu_ba50mirror),
