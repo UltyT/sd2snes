@@ -112,6 +112,8 @@ verilog/*/_xmsgs/
 verilog/*/iseconfig/
 verilog/*/xst/
 verilog/*/xlnx_auto_0_xdb/
+verilog/*/isim
+verilog/*/fuse.xmsgs
 .project
 .cproject
 src/obj/sd2snes.hex
