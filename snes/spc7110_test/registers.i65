@@ -1,0 +1,64 @@
+//PPU I/O
+#define REG_INIDISP         $2100
+#define REG_BGMODE          $2105
+#define REG_BG1SC           $2107
+#define REG_BG2SC           $2108
+#define REG_BG3SC           $2109
+#define REG_BG4SC           $210A
+#define REG_BG12NBA         $210B
+#define REG_BG34NBA         $210C
+#define REG_TM              $212C
+#define REG_TS              $212D
+
+//DMA channels
+#define REG_MDMAEN          $420B   //Ecstacy Enable
+#define REG_DMACONFIG       $4300   //DMA Parameters
+#define REG_DMAPORT         $4301   //B-Bus Address
+#define REG_DMAADDR         $4302   //A-Bus Address (lo)
+#define REG_DMAADDRH        $4303   //A-Bus Address (hi)
+#define REG_DMAADDRB        $4304   //A-Bus Address (bank)
+#define REG_DMALEN          $4305   //DMA Length (lo)
+#define REG_DMALENH         $4306   //DMA Length (hi)
+
+//How DMA reads/writes from ports.
+#define M_DMA_BYTESINGLE    $00 //Write 8bits to a single port.
+#define M_DMA_WORDSINGLE    $01 //Write 16bits to two neighboring ports.
+#define M_DMA_BYTEDOUBLE    $02 //Write 16bits to a single port.
+#define M_DMA_WORDDOUBLE    $03 //Write 32bits to two neighboring ports.
+#define M_DMA_DBLWORDLINEAR $04 //Write 32bits to four neighboring ports.
+#define M_DMA_WORDREPEAT    $05 //Write 32bits to two neighboring ports.
+
+//Address Bus A behavior
+#define M_DMA_ADDRINCREMENT $00
+#define M_DMA_ADDRDECREMENT $10
+#define M_DMA_ADDRFIXED     $08 //e.g. an I/O port.
+                                //Bus B is always FIXED
+
+//Addressing mode (HDMA)
+#define M_DMA_HDIRECT       $00
+#define M_DMA_HINDIRECT     $40 //Uses a table. HDMA only.
+
+//Direction
+#define M_DMA_WRITEREGS     $00 //e.g. AAddr to BAddr
+#define M_DMA_WRITEMEMORY   $80 //e.g. BAddr to AAddr
+
+//VRAM Port
+#define REG_VMAIN           $2115
+#define REG_VMADD           $2116
+#define REG_VMADDH          $2117
+#define REG_VMDATA          $2118
+#define REG_VMDATAH         $2119
+
+//CGRAM Port
+#define REG_CGADD           $2121
+#define REG_CGDATA          $2122
+
+#define M_VMAIN_INCREMENTL    $00
+#define M_VMAIN_INCREMENTH    $80
+#define M_VMAIN_TRANSLATENONE $00
+#define M_VMAIN_TRANSLATE8    $04
+#define M_VMAIN_TRANSLATE9    $08
+#define M_VMAIN_TRANSLATE10   $0C
+#define M_VMAIN_STEP1         $00
+#define M_VMAIN_STEP32        $01
+#define M_VMAIN_STEP128       $02

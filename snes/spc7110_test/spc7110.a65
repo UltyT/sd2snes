@@ -1,0 +1,40 @@
+SPC7110_AluWaitResult:
+    sep #$20 : .as
+    
+    lda $482F
+    and #$80
+    bne SPC7110_AluWaitResult
+    rts
+
+SPC7110_AluReset:
+    sep #$20 : .as
+    
+    lda #$00
+    sta $482E
+    rts
+    
+SPC7110_AluMulTest:
+    sep #$20 : .as
+    
+    lda W_SPC7110_MulA
+    sta $4820
+    lda W_SPC7110_MulA + 1
+    sta $4821
+    
+    lda W_SPC7110_MulB
+    sta $4824
+    lda W_SPC7110_MulB + 1
+    sta $4825 ;This triggers a multiply.
+    
+    jsr SPC7110_AluWaitResult
+    
+    lda $4828
+    sta W_SPC7110_MulResult
+    lda $4829
+    sta W_SPC7110_MulResult + 1
+    lda $482A
+    sta W_SPC7110_MulResult + 2
+    lda $482B
+    sta W_SPC7110_MulResult + 3
+    
+    rts

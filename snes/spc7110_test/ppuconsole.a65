@@ -1,0 +1,254 @@
+#include "registers.i65"
+
+;Load some graphics into the PPU
+PPUConsole_Init:
+    ;turn off PPU
+    sep #$20 : .as
+    lda #8F
+    sta REG_INIDISP
+    
+    ;mandatory wait period, apparantly
+    ldy #$FF
+iniwait
+    dey
+    bne iniwait
+    
+    ;Console screen: Mode 0, 8x8 tiles, normal priority
+    ;                BG1 map address $VR:1000
+    ;                   tile address $VR:0000
+    lda #0
+    sta REG_BGMODE
+    
+    lda #0
+    sta REG_BG12NBA
+    
+    lda #$04
+    sta REG_BG1SC
+    
+    lda #$01
+    sta REG_TM
+    
+    lda #$00
+    sta REG_TS
+    
+    ;Setup DMA for the console font.
+    lda #(M_DMA_WORDSINGLE | M_DMA_ADDRINCREMENT | M_DMA_WRITEREGS)
+    sta REG_DMACONFIG
+    
+    lda #(REG_VMDATA & $FF)
+    sta REG_DMAPORT
+    
+    lda #(M_VMAIN_INCREMENTH | M_VMAIN_TRANSLATENONE | M_VMAIN_STEP1)
+    sta REG_VMAIN
+    
+    lda #^PPUConsole_FontData
+    sta REG_DMAADDRB
+    
+    rep #$20 : .al
+    lda #$0000
+    sta REG_VMADD
+    
+    lda #PPUConsole_FontData
+    sta REG_DMAADDR
+    
+    lda #$800       //(PPUConsole_FontData_END - PPUConsole_FontData)
+                    //snescom sucks and won't let me do this kind of expr
+    sta REG_DMALEN
+    
+    //Start the xfr
+    sep #$20 : .as
+    lda #01
+    sta REG_MDMAEN
+    
+    //xfr done, set up other console vars
+    lda #00
+    sta W_PPUConsole_PosX
+    sta W_PPUConsole_PosY
+    
+    //wipe tmap
+    rep #$20 : .al
+    ldx #$400
+    ldy #$400
+    
+wipeLoop
+    sty REG_VMADD
+    stz REG_VMDATA
+    iny
+    dex
+    bne wipeLoop
+    
+    sep #$20 : .as
+    
+    ;Color 0: black plz
+    lda #$00
+    sta REG_CGADD
+    
+    stz REG_CGDATA
+    stz REG_CGDATA
+    
+    ;Color 1: Random color
+    lda #$01
+    sta REG_CGADD
+    
+    lda #$CC
+    sta REG_CGDATA
+    sta REG_CGDATA
+    
+    ;Color 1: Random color
+    lda #$02
+    sta REG_CGADD
+    
+    lda #37
+    sta REG_CGDATA
+    sta REG_CGDATA
+    
+    ;Color 3: White plz
+    lda #$03
+    sta REG_CGADD
+    
+    lda #$FF
+    sta REG_CGDATA
+    sta REG_CGDATA
+    
+    ;turn on PPU
+    lda #$0F
+    sta REG_INIDISP
+    
+    rts
+    
+;Print character in 8bit A
+PPUConsole_PrintChar:
+    sep #$20 : .as
+    pha
+    
+    ;turn off PPU
+    lda #$8F
+    sta REG_INIDISP
+    ldy #$FF
+iniwait2
+    dey
+    bne iniwait2
+    
+    ;form a VRAM address
+    lda W_PPUConsole_PosY
+    rep #$20 : .al
+    and #$FF
+    asl
+    asl
+    asl
+    asl
+    asl
+    pha
+    
+    sep #$20 : .as
+    lda W_PPUConsole_PosX
+    rep #$20 : .al
+    and #$FF
+    adc $1,s
+    adc #$0400
+    sta REG_VMADD
+    
+    pla
+    
+    sep #$20 : .as
+    pla
+    sta REG_VMDATA
+    
+    lda #$00
+    sta REG_VMDATAH
+    
+    ;turn on PPU
+    lda #$0F
+    sta REG_INIDISP
+    
+    lda W_PPUConsole_PosX
+    adc #01
+    cmp #32
+    beq horizOverflow
+    
+horizNoOverflow
+    sta W_PPUConsole_PosX
+    rts
+    
+horizOverflow
+PPUConsole_Newline:
+    sep #$20 : .as
+    lda #0
+    sta W_PPUConsole_PosX
+    
+    lda W_PPUConsole_PosY
+    adc #01
+    cmp #32
+    bne vertNoOverflow
+    
+vertOverflow
+    lda #0
+    
+vertNoOverflow
+    sta W_PPUConsole_PosY
+    rts
+    
+;Print string in W_PPUConsole_StringPtr
+PPUConsole_PrintStr:
+    ldy #0
+    sep #$20 : .as
+    
+stringLoop
+    lda [W_PPUConsole_StringPtr], y
+    beq nullTerm
+    cmp #$0A
+    beq newLine
+    phy
+    jsr PPUConsole_PrintChar
+    ply
+    iny
+    bra stringLoop
+    
+newLine
+    jsr PPUConsole_Newline
+    iny
+    bra stringLoop
+    
+nullTerm
+    rts
+    
+;Print hexdecimal 8b value in A
+PPUConsole_PrintIntHex8:
+    sep #$20 : .as
+    pha
+    
+hiVal
+    and #$F0
+    lsr
+    lsr
+    lsr
+    lsr
+    cmp #$0A
+    bcs ltrValHi
+    
+numValHi
+    adc #$30
+    jsr PPUConsole_PrintChar
+    bra lowVal
+    
+ltrValHi
+    sbc #$0A
+    adc #$40
+    jsr PPUConsole_PrintChar
+    
+lowVal
+    pla
+    and #$0F
+    cmp #$0A
+    bcs ltrValLow
+    
+numValLow
+    adc #$30
+    jsr PPUConsole_PrintChar
+    rts
+    
+ltrValLow
+    sbc #$0A
+    adc #$40
+    jsr PPUConsole_PrintChar
+    rts

@@ -1,0 +1,11 @@
+.link page $7F
+.data
+
+W_SPC7110_MulA: .word 1
+W_SPC7110_MulB: .word 1
+W_SPC7110_MulResult: .word 1
+    .word 1
+W_PPUConsole_PosX: .byt 0
+W_PPUConsole_PosY: .byt 0
+W_PPUConsole_StringPtr: .word 0
+W_PPUConsole_StringPtrBank: .byt 0
