@@ -734,6 +734,14 @@ assign ROM_BHE = ROM_ADDR0;
 assign ROM_BLE = !ROM_ADDR0;
 
 assign SNES_DATABUS_OE = msu_enable ? 1'b0 :
+                         //TODO: What if we read an unmapped SPC7110 port?
+                         //      Will it open bus at the CPU or open bus on the
+                         //      FPGA? What does real hardware do?
+                         spc7110_banked_enable ? 1'b0 :
+                         spc7110_alu_enable ? 1'b0 :
+                         spc7110_direct_enable ? 1'b0 :
+                         spc7110_dcu_enable ? 1'b0 :
+                         spc7110_dcu_ba50mirror ? 1'b0 :
                          srtc_enable ? (SNES_READ & SNES_WRITE) :
                          snescmd_enable ? (~(snescmd_unlock | feat_cmd_unlock) | (SNES_READ & SNES_WRITE)) :
                          r213f_enable & !SNES_PARD ? 1'b0 :
