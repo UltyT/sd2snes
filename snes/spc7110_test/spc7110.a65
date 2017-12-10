@@ -38,3 +38,40 @@ SPC7110_AluMulTest:
     sta W_SPC7110_MulResult + 3
     
     rts
+    
+SPC7110_AluDivTest:
+    sep #$20 : .as
+    
+    stz $482E
+    
+    lda W_SPC7110_Dividend
+    sta $4820
+    lda W_SPC7110_Dividend + 1
+    sta $4821
+    lda W_SPC7110_Dividend + 2
+    sta $4822
+    lda W_SPC7110_Dividend + 3
+    sta $4823
+    
+    lda W_SPC7110_Divisor
+    sta $4826
+    lda W_SPC7110_Divisor + 1
+    sta $4827 ;This triggers a divide.
+    
+    jsr SPC7110_AluWaitResult
+    
+    lda $4828
+    sta W_SPC7110_Quotient
+    lda $4829
+    sta W_SPC7110_Quotient + 1
+    lda $482A
+    sta W_SPC7110_Quotient + 2
+    lda $482B
+    sta W_SPC7110_Quotient + 3
+    
+    lda $482C
+    sta W_SPC7110_Remainder
+    lda $482D
+    sta W_SPC7110_Remainder + 1
+    
+    rts

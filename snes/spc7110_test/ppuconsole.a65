@@ -4,7 +4,7 @@
 PPUConsole_Init:
     ;turn off PPU
     sep #$20 : .as
-    lda #8F
+    lda #$8F
     sta REG_INIDISP
     
     ;mandatory wait period, apparantly
@@ -98,7 +98,7 @@ wipeLoop
     lda #$02
     sta REG_CGADD
     
-    lda #37
+    lda #$37
     sta REG_CGDATA
     sta REG_CGDATA
     
@@ -162,8 +162,9 @@ iniwait2
     sta REG_INIDISP
     
     lda W_PPUConsole_PosX
+    rep #$01
     adc #01
-    cmp #32
+    cmp #$20
     beq horizOverflow
     
 horizNoOverflow
@@ -177,8 +178,9 @@ PPUConsole_Newline:
     sta W_PPUConsole_PosX
     
     lda W_PPUConsole_PosY
+    rep #$01
     adc #01
-    cmp #32
+    cmp #$20
     bne vertNoOverflow
     
 vertOverflow

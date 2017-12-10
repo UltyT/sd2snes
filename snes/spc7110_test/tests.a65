@@ -100,11 +100,113 @@ GAME_MAIN:
    
    lda W_SPC7110_MulResult
    jsr PPUConsole_PrintIntHex8
+   
+   rep #$20 : .al
+   lda #Test_ConsoleString4
+   sta W_PPUConsole_StringPtr
+   
+   sep #$20 : .as
+   lda #^Test_ConsoleString4
+   sta W_PPUConsole_StringPtrBank
+   jsr PPUConsole_PrintStr
+   
+   rep #$20 : .al
+   
+   lda #$CFFF
+   sta W_SPC7110_Dividend
+   lda #$FEFF
+   sta W_SPC7110_Dividend + 2
+   lda #$0010
+   sta W_SPC7110_Divisor
+   
+   jsr SPC7110_AluDivTest
+   
+   sep #$20 : .as
+   lda W_SPC7110_Quotient + 3
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Quotient + 2
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Quotient + 1
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Quotient
+   jsr PPUConsole_PrintIntHex8
+   
+   rep #$20 : .al
+   lda #Test_ConsoleString5
+   sta W_PPUConsole_StringPtr
+   
+   sep #$20 : .as
+   lda #^Test_ConsoleString5
+   sta W_PPUConsole_StringPtrBank
+   jsr PPUConsole_PrintStr
+   
+   sep #$20 : .as
+   lda W_SPC7110_Remainder + 1
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Remainder
+   jsr PPUConsole_PrintIntHex8
+   
+   rep #$20 : .al
+   lda #Test_ConsoleString6
+   sta W_PPUConsole_StringPtr
+   
+   sep #$20 : .as
+   lda #^Test_ConsoleString6
+   sta W_PPUConsole_StringPtrBank
+   jsr PPUConsole_PrintStr
+   
+   rep #$20 : .al
+   
+   lda #$FFFF
+   sta W_SPC7110_Dividend
+   lda #$FFFE
+   sta W_SPC7110_Dividend + 2
+   lda #$FFFF
+   sta W_SPC7110_Divisor
+   
+   jsr SPC7110_AluDivTest
+   
+   sep #$20 : .as
+   lda W_SPC7110_Quotient + 3
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Quotient + 2
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Quotient + 1
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Quotient
+   jsr PPUConsole_PrintIntHex8
+   
+   rep #$20 : .al
+   lda #Test_ConsoleString7
+   sta W_PPUConsole_StringPtr
+   
+   sep #$20 : .as
+   lda #^Test_ConsoleString7
+   sta W_PPUConsole_StringPtrBank
+   jsr PPUConsole_PrintStr
+   
+   sep #$20 : .as
+   lda W_SPC7110_Remainder + 1
+   jsr PPUConsole_PrintIntHex8
+   
+   lda W_SPC7110_Remainder
+   jsr PPUConsole_PrintIntHex8
 -	bra -
 
-Test_ConsoleString1: .byt "SD2SNES SPC7110 CHECK PROGRAM", $0A, "MUL: $FFFF * $FFFF = $", $00
-Test_ConsoleString2: .byt $0A, "MUL: $F0BF * $1234 = $", $00
-Test_ConsoleString3: .byt $0A, "MUL: $0000 * $0000 = $", $00
+Test_ConsoleString1: .byt "SD2SNES SPC7110 CHECK PROGRAM", $0A, "MUL:    $FFFF*$FFFF = $", $00
+Test_ConsoleString2: .byt $0A, "MUL:    $F0BF*$1234 = $", $00
+Test_ConsoleString3: .byt $0A, "MUL:    $0000*$0000 = $", $00
+Test_ConsoleString4: .byt $0A, "DIV:$FEFFCFFF/$0010 = $", $00
+Test_ConsoleString5: .byt $0A, "                        + $", $00
+Test_ConsoleString6: .byt $0A, "DIV:$FFFEFFFF/$FFFF = $", $00
+Test_ConsoleString7: .byt $0A, "                        + $", $00
 
 copy_memtest:
 	rep #$30 : .al : .xl

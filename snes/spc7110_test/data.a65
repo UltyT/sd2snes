@@ -5,6 +5,12 @@ W_SPC7110_MulA: .word 1
 W_SPC7110_MulB: .word 1
 W_SPC7110_MulResult: .word 1
     .word 1
+W_SPC7110_Dividend: .word 1
+    .word 1
+W_SPC7110_Divisor: .word 1
+W_SPC7110_Quotient: .word 1
+    .word 1
+W_SPC7110_Remainder: .word 1
 W_PPUConsole_PosX: .byt 0
 W_PPUConsole_PosY: .byt 0
 W_PPUConsole_StringPtr: .word 0
