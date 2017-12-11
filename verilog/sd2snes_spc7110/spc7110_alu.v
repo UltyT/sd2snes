@@ -177,7 +177,7 @@ always @(posedge CLK) begin
                 
                 //Writes to DIVISOR1 trigger a divide.
                 alu_dividend <= alu_next_arga;
-                alu_divisor <= alu_next_divisor;
+                alu_divisor <= (alu_next_divisor & 16'h00FF) | (sfc_data_in << 8);
                 alu_result_ctr <= alu_signed_maths ? ALU_SDIV_LATENCY : ALU_UDIV_LATENCY;
                 alu_lastop_division <= 1;
                 alu_rfd_seen <= 0;
