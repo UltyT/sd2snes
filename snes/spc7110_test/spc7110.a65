@@ -79,6 +79,9 @@ SPC7110_AluDivTest:
 SPC7110_DirectDataTest4810:
     sep #$20 : .as
     
+    lda #$01
+    sta $4813
+    
     lda #$00
     sta $4813
     
@@ -230,6 +233,9 @@ directReadLoop
     
 SPC7110_DirectDataTest481A:
     sep #$20 : .as
+    
+    lda #$01
+    sta $4813
     
     lda #$00
     sta $4813
