@@ -198,6 +198,9 @@ GAME_MAIN:
    
    lda W_SPC7110_Remainder
    jsr PPUConsole_PrintIntHex8
+   
+   jsr SPC7110_DirectDataTest4810
+   jsr SPC7110_DirectDataTest481A
 -	bra -
 
 Test_ConsoleString1: .byt "SD2SNES SPC7110 CHECK PROGRAM", $0A, "MUL:    $FFFF*$FFFF = $", $00

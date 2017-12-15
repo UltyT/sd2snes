@@ -1,4 +1,4 @@
-OBJS = header.ips reset.o65 tests.o65 spc7110.o65 data.o65 ppuconsole.o65 ppuconsole_font.o65
+OBJS = header.ips reset.o65 tests.o65 spc7110.o65 data.o65 ppuconsole.o65 ppuconsole_font.o65 datarom.o65
 
 all: clean spc7110_test.sfc map
 
