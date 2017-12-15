@@ -26,18 +26,16 @@ module spc7110_direct(
     //Data ROM MMIO access is SNES triggered, and thus cannot be interrupted by
     //a higher-priority PSRAM access...
     output direct_rom_rd,         //Data ROM MMIO is accessing PSRAM...
+	 output [23:0] direct_mapped_addr, //and here's the address we need.
     
     //SFC I/O ports
     input direct_sfc_enable,      //SFC reads/writes map to Data ROM MMIO
     input [3:0] sfc_direct_port,
     input sfc_rd,
+	 input sfc_rd_end,
     input sfc_wr,
     input [7:0] sfc_data_in,
-    output [7:0] sfc_data_out,
-    
-    //PSRAM bus
-    input [15:0] psram_data,
-    output [22:0] psram_addr
+    output [7:0] sfc_data_out
 );
 
 reg direct_allow_read;
@@ -76,21 +74,23 @@ wire [23:0] direct_signed_step = { {8{direct_step[15]}}, direct_step[15:0] };
 wire [23:0] direct_signed_offset = { {8{direct_offset[15]}}, direct_offset[15:0] };
 
 reg [7:0] direct_mmio_out;
-reg direct_mmio_en;
 
-reg [22:0] direct_psram_addr;
-
-assign sfc_data_out = direct_mmio_en ? direct_mmio_out : psram_data;
+assign sfc_data_out = direct_mmio_out;
 //TODO: Account for small data ROM size with masking...
 //SPC7110 is natively single-ROM, so we have to add the program ROM size...
 //Sorry byuu
-assign psram_addr = direct_psram_addr + (DIRECT_PROGROM_SIZE >> 1);
-assign direct_rom_rd = !direct_mmio_en;
+assign direct_mapped_addr = DIRECT_PROGROM_SIZE + direct_base +
+                            (direct_use_offset | sfc_direct_port == DIRECT_READSET)
+                                ? (direct_use_signed_offset ? direct_signed_offset
+                                                            : direct_offset)
+                                : 0;
+assign direct_rom_rd = direct_allow_read
+                        & direct_sfc_enable
+                        & (sfc_direct_port == DIRECT_READINC
+                            | sfc_direct_port == DIRECT_READSET);
 
 always @(posedge CLK) begin
-    if (RESET) begin
-        direct_mmio_en <= 1; //prevent locking DCU/hogging PSRAM addr bus
-    end else if (direct_sfc_enable & sfc_wr) begin
+    if (direct_sfc_enable & sfc_wr) begin
         case (sfc_direct_port)
             DIRECT_BASE0: begin
                 direct_base <= (direct_base & 24'hFFFF00) | sfc_data_in;
@@ -106,7 +106,7 @@ always @(posedge CLK) begin
                 end
             end
             DIRECT_OFFSET0: begin
-                direct_offset <= (direct_offset & 16'hFF00) | sfc_data_in;
+                direct_offset = (direct_offset & 16'hFF00) | sfc_data_in;
                 
                 //TODO: Isn't this supposed to add only the 8 bits?
                 //As opposed to "add when you write the lower 8 bits...
@@ -117,7 +117,7 @@ always @(posedge CLK) begin
                 end
             end
             DIRECT_OFFSET1: begin
-                direct_offset <= (direct_offset & 16'h00FF) | (sfc_data_in << 8);
+                direct_offset = (direct_offset & 16'h00FF) | (sfc_data_in << 8);
                 
                 if (direct_add_16b_offset & direct_use_signed_offset) begin
                     direct_base <= direct_base + direct_signed_offset;
@@ -138,50 +138,35 @@ always @(posedge CLK) begin
     end else if (direct_sfc_enable & sfc_rd) begin
         case (sfc_direct_port)
             DIRECT_BASE0: begin
-                direct_mmio_en <= 1;
                 direct_mmio_out <= direct_base & 24'h0000FF;
             end
             DIRECT_BASE1: begin
-                direct_mmio_en <= 1;
                 direct_mmio_out <= (direct_base & 24'h00FF00) >> 8;
             end
             DIRECT_BASE2: begin
-                direct_mmio_en <= 1;
                 direct_mmio_out <= (direct_base & 24'hFF0000) >> 16;
             end
             DIRECT_OFFSET0: begin
-                direct_mmio_en <= 1;
                 direct_mmio_out <= direct_offset & 16'h00FF;
             end
             DIRECT_OFFSET1: begin
-                direct_mmio_en <= 1;
                 direct_mmio_out <= (direct_offset & 16'hFF00) >> 8;
             end
             DIRECT_STEP0: begin
-                direct_mmio_en <= 1;
                 direct_mmio_out <= direct_step & 16'h00FF;
             end
             DIRECT_STEP1: begin
-                direct_mmio_en <= 1;
                 direct_mmio_out <= (direct_step & 16'hFF00) >> 8;
             end
             DIRECT_MODE: begin
-                direct_mmio_en <= 1;
                 //TODO: fullsnes says this triggers the "special actions"
                 direct_mmio_out <= direct_mode;
             end
+        endcase
+    end else if (direct_sfc_enable & sfc_rd_end) begin
+        case (sfc_direct_port)
             DIRECT_READINC: begin
                 if (direct_allow_read) begin
-                    direct_mmio_en <= 0;
-                    
-                    if (direct_use_offset & direct_use_signed_offset) begin
-                        direct_psram_addr <= direct_base + direct_signed_offset;
-                    end else if (direct_use_offset) begin
-                        direct_psram_addr <= direct_base + direct_offset;
-                    end else begin
-                        direct_psram_addr <= direct_base;
-                    end
-                    
                     if (direct_use_increment_base & direct_use_step & direct_use_signed_step) begin
                         direct_base <= direct_base + direct_signed_step;
                     end else if (direct_use_increment_base & direct_use_step) begin
@@ -189,27 +174,16 @@ always @(posedge CLK) begin
                     end else if (direct_use_increment_base) begin
                         direct_base <= direct_base + 1;
                     end else if (direct_use_increment_offset & direct_use_step & direct_use_signed_step) begin
-                        direct_offset <= direct_offset + direct_signed_step;
+                        direct_offset = direct_offset + direct_signed_step;
                     end else if (direct_use_increment_offset & direct_use_step) begin
-                        direct_offset <= direct_offset + direct_step;
+                        direct_offset = direct_offset + direct_step;
                     end else if (direct_use_increment_offset) begin
-                        direct_offset <= direct_offset + 1;
+                        direct_offset = direct_offset + 1;
                     end
-                end else begin
-                    direct_mmio_en <= 1;
-                    direct_mmio_out <= 8'h00; //TODO: Open bus?
                 end
             end
             DIRECT_READSET: begin
                 if (direct_allow_read) begin
-                    direct_mmio_en <= 0;
-                    
-                    if (direct_use_signed_offset) begin
-                        direct_psram_addr <= direct_base + direct_signed_offset;
-                    end else begin
-                        direct_psram_addr <= direct_base + direct_offset;
-                    end
-                    
                     if (direct_add_16b_offset_481A & direct_use_signed_offset) begin
                         direct_base <= direct_base + direct_signed_offset;
                     end else if (direct_add_16b_offset_481A) begin
@@ -220,9 +194,6 @@ always @(posedge CLK) begin
                     //set to write to the offset, even though fullsnes and higan
                     //claim otherwise. Further testing is required to determine
                     //if $4818:b4 matters or not...
-                end else begin
-                    direct_mmio_en <= 1;
-                    direct_mmio_out <= 8'h00; //TODO: Open bus?
                 end
             end
         endcase
