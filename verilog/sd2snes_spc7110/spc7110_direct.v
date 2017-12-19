@@ -80,10 +80,10 @@ assign sfc_data_out = direct_mmio_out;
 //SPC7110 is natively single-ROM, so we have to add the program ROM size...
 //Sorry byuu
 assign direct_mapped_addr = DIRECT_PROGROM_SIZE + direct_base +
-                            (direct_use_offset | sfc_direct_port == DIRECT_READSET)
-                                ? (direct_use_signed_offset ? direct_signed_offset
-                                                            : direct_offset)
-                                : 0;
+                            ((direct_use_offset | sfc_direct_port == DIRECT_READSET)
+                                 ? (direct_use_signed_offset ? direct_signed_offset
+                                                             : direct_offset)
+                                 : 0);
 assign direct_rom_rd = direct_allow_read
                         & direct_sfc_enable
                         & (sfc_direct_port == DIRECT_READINC
