@@ -2,10 +2,13 @@
 ;   feature enhanced auto region switching SNES CIC clone 
 ;   for PIC Microcontrollers (lock mode)
 ;
+;   RGB LED version (common cathode)
+;
+;   This version drives three independent LED anodes (e.g. R,G,B) instead of
+;   two (e.g. R,G,RG).
+;
 ;   Copyright (C) 2010 by Maximilian Rehkopf (ikari_01) <otakon@gmx.net>
 ;   This software is part of the sd2snes project.
-;
-;   Last Modified: Oct. 2015 by Peter Bartmann <borti4938@gmx.de>
 ;
 ;   Based on reverse engineering work and disassembly by segher.
 ;   http://hackmii.com/2010/01/the-weird-and-wonderful-cic/
@@ -33,9 +36,9 @@
 ;   CIC clk in (56) [7] |2  A5 A0 13| CIC lock reset in [8]
 ;                D4 out |3  A4 A1 12| 50/60Hz out
 ;        REG_TIMEOUT in |4  A3 A2 11| host reset out [10]
-;         LED out (grn) |5  C5 C0 10| CIC data i/o 0 (55) [1] / {50/60Hz in}
-;         LED out (red) |6  C4 C1  9| CIC data i/o 1 (24) [2] / {D4 in}
-;           LED_TYPE in |7  C3 C2  8| CIC slave reset out (25) [11]
+;        LED out (50Hz) |5  C5 C0 10| CIC data i/o 0 (55) [1] / {50/60Hz in}
+;        LED out (60Hz) |6  C4 C1  9| CIC data i/o 1 (24) [2] / {D4 in}
+;        LED out (auto) |7  C3 C2  8| CIC slave reset out (25) [11]
 ;                       `-----------'
 ;
 ;   pin 8 connected to key CIC pin 7 (or clone CIC pin 5)
@@ -44,10 +47,6 @@
 ;   pin 11 connected to key CIC pin 9 (SNES /reset line)
 ;   pin 12 connected to PPU1 pin 24 & PPU2 pin 30 (both isolated from mainboard)
 ;   pin 13 connected to reset button
-;
-;   LED_TYPE sets the output mode for the LED pins (must be tied to either level):
-;      low  = common cathode
-;      high = common anode   (output inverted)
 ;
 ;   D4 out is always switched to the autodetected region and is not user
 ;   overridable except in SuperCIC pair mode or when no key CIC is detected.
@@ -124,11 +123,12 @@
 ;   `-------<--------<-------'
 ;
 ;   Table 3. LED color according to user setting.
+;   (example. actual color depends on individual wiring.)
 ;   mode	LED color
 ;   ---------------------
-;   60Hz	red
-;   50Hz	green
-;   Auto	orange
+;   60Hz	green
+;   50Hz	red
+;   Auto	blue
 ;
 ;   Table 4. memory usage.
 ;   -------------------basic CIC functions--------------------
@@ -144,15 +144,15 @@
 ;   0x4e		loop variable for longwait
 ;   0x4f		loop variable for wait
 ;   -------------------SuperCIC extensions--------------------
-;   0x50		power LED state (no bits except 4 and 5 must be set!!)
+;   0x50		power LED state (no bits except 3, 4 and 5 must be set!!)
 ;   0x51		last reset button state
 ;   0x52		mode dirty flag
 ;   0x53		tmr overflow counter
 ;   0x54		region output (0: 60Hz, 2: 50Hz)
-;   0x55		final mode setting
-;   0x56		temp LED state
-;   0x57		detected region (0: 60Hz, 2: 50Hz)
-;   0x58		forced region (0: 60Hz, 2: 50Hz)
+;   0x55		final mode setting (0x8: Auto, 0x10: 60Hz, 0x20: 50Hz)
+;   0x56		temp LED state during cycling (0x8: Auto, 0x10: 60Hz, 0x20: 50Hz)
+;   0x57		detected region (0: 60Hz, 2: 50Hz) (effective when Auto mode selected)
+;   0x58		manually set region (0: 60Hz, 2: 50Hz) (effective when Auto mode not selected)
 ;   0x59		detected D4 (0: 60Hz, 16: 50Hz)
 ;   0x5e		SuperCIC pair mode detect (phase 1)
 ;   0x5f		SuperCIC pair mode detect (phase 2)
@@ -179,7 +179,6 @@
 			ENDIF
 		ENDIF
 	ENDIF
-
 ; -----------------------------------------------------------------------
 
 ; -----------------------------------------------------------------------
@@ -225,18 +224,15 @@ rst_loop
 	nop
 	movwf	0x55		; store saved mode in mode var
 	movwf	0x56		; and temp LED
-	movwf	0x58		; and forced region
-	andlw	0x03		; mask
-	btfsc	PORTC, 3	; invert LEDs?
-	xorlw	0x03		; then make it so	
+	clrf	0x58		; and forced region:
+	btfsc	0x56, 5		; copy state of PAL bit (0x56 bit 5)
+	bsf	0x58, 1		; to manual video mode output bit (0x58 bit 1)
+	andlw	0x38		; mask to ensure only the LED bits are present
 	movwf	0x50		; and store
-	swapf	0x50, f		; and nibbleswap for actual output
+	nop
 
 	btfss	PORTA, 3	; if D4 mode is disabled:
 	bsf	0x53, 4 	; simulate region timeout->immediate region chg
-
-	movlw	0x2
-	andwf	0x58, f
 
 	clrf	PIR1		; reset overflow bit
 	clrf	TMR1L		; reset counter
@@ -245,7 +241,7 @@ rst_loop
 	goto	main		; go go go
 init
 ;	PORTA:  in out  in out out  in
-;	PORTC: out out  in out out  in
+;	PORTC: out out out out out  in
 	bcf	STATUS, RP0
 	clrf	PORTA
 	clrf	PORTC		; set all PORTC outputs low to avoid premature IRQ to key.
@@ -257,7 +253,7 @@ init
 	_CLRF_ANSEL
 	movlw	0x29		; in out in out out in
 	movwf	TRISA
-	movlw	0x09		; out out in out out in
+	movlw	0x01		; out out out out out in
 	movwf	TRISC
 	movlw	0x00		; no pullups
 	movwf	WPUA
@@ -430,7 +426,7 @@ loop1
 
 	btfsc	0x44, 0		; check "direction"
 	rrf	0x42, f		; shift received bit into place
-	bsf	FSR, 4  	; goto other stream
+	bsf	FSR, 4  	; goto other stream (offset + 0x10)
 	movf	INDF, w		; read
 	xorwf	0x42, f 	; xor received + calculated
 	bcf	FSR, 4		; back to our own stream
@@ -946,9 +942,12 @@ checkrst_1_0	; 26
 	clrf	0x52		; clear modechange flag
 	movf	0x56, w		; get temp mode
 	movwf	0x55		; set final mode
-	movwf	0x58		; set forced mode
-	bsf	STATUS, RP0     ; save to EEPROM
+	clrf	0x58
+	btfsc	0x56, 5		; copy state of PAL bit (0x56 bit 5)
+	bsf		0x58, 1		; to manual video mode output bit (0x58 bit 1)
 	nop
+	nop
+	bsf	STATUS, RP0     ; save to EEPROM
 	movwf	EEDAT
 	bsf	EECON1,WREN
 	movlw	0x55
@@ -957,9 +956,6 @@ checkrst_1_0	; 26
 	movwf	EECON2
 	bsf	EECON1, WR
 	bcf	STATUS, RP0     ; two cycles again
-	nop
-	movlw	0x2
-	andwf	0x58, f		; cleanup forced mode
 	bcf	T1CON, 0	; stop the timer
 	clrf	PIR1		; reset overflow bit
 	clrf	TMR1L		; reset counter
@@ -981,16 +977,16 @@ checkrst_1_1	; 24
 	clrf	TMR1L		; reset counter
 	clrf	TMR1H
 	bsf	T1CON, 0	; restart the timer
-	incf	0x56, f		; change tmp LED/mode
-	movlw	0x5
-	btfsc	0x56, 2		; if 4:
-	xorwf	0x56, f		; change back to 1
+	rlf	0x56, f		; change tmp LED/mode
+	movlw	0x8		; bit 3 (reset constant for mode)
+	btfsc	0x56, 6		; if bit 6 reached (LEDs are bit 3-5)
+	movwf	0x56		; change back to bit 3
 	movf	0x56, w
-	andlw	0x03		; mask
-	btfsc	PORTC, 3	; invert LEDs?
-	xorlw	0x03		; then make it so
+	andlw	0x38		; mask to ensure only the LED bits are present
+	nop
+	nop
 	movwf	0x50
-	swapf	0x50, f		; adjust for GPIO pins
+	nop
 	bsf	0x52, 0		; set modechange flag
 	goto	checkrst_end
 
@@ -1016,7 +1012,7 @@ checkrst_0_0	; 24
 	btfss	0x53, 4		; 0x10 reached?
 	goto	checkrst_end_plus9
 checkrst_0_0_setregion
-	movlw	0x3
+	movlw	0x08		; bit 3 = auto
 	xorwf	0x55, w 	; mode=auto?
 	btfss	STATUS, Z
 	goto	checkrst_0_0_setregion_forced
@@ -1077,28 +1073,24 @@ supercic_pairmode
 	bcf	STATUS, RP0
 	nop
 supercic_pairmode_loop
-	clrf	0x5d
-	bsf	0x5d, 2
-	btfsc	PORTC, 0
+	clrf	0x5d		; clear GPIO buffer
+	bsf	0x5d, 2			; run console (host reset = false)
+	btfsc	PORTC, 0	; copy C0 (video mode in) to A1 (video mode out)
 	bsf	0x5d, 1
-	btfsc	PORTC, 1
+	btfsc	PORTC, 1	; copy C1 (D4 in) to A4 (D4 out)
 	bsf	0x5d, 4
-	btfsc	PORTA, 0
+	btfsc	PORTA, 0	; reset host if reset button pressed
 	bcf	0x5d, 2
 	movf	0x5d, w
-	movwf	PORTA
-	btfss	PORTC, 0
+	movwf	PORTA		; send to output pins
+	btfss	PORTC, 0	; handle LEDs
 	goto	supercic_pairmode_led_60
 supercic_pairmode_led_50
-	movlw	0x20
-	btfsc	PORTC, 3
-	xorlw	0x30
+	movlw	0x20		; PAL: red LED
 	movwf	PORTC
 	goto	supercic_pairmode_loop
 supercic_pairmode_led_60
-	movlw	0x10
-	btfsc	PORTC, 3
-	xorlw	0x30
+	movlw	0x10		; NTSC: green LED
 	movwf	PORTC
 	goto	supercic_pairmode_loop
 
@@ -1138,6 +1130,6 @@ rst2_loop2
 ; -----------------------------------------------------------------------
 ; eeprom data
 	org __EEPROM_START
-	de	0x01		;current mode (default: 60Hz)
+	de	0x10		;current mode (default: 60Hz)
 	end
 ; ------------------------------------------------------------------------
