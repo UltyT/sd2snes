@@ -21,12 +21,24 @@
 # To rebuild project do "make clean" then "make all".
 #----------------------------------------------------------------------------
 
+# select programming interface (default: ae-ft2232)
+# setting is expanded to filename interface/$INTERFACE.cfg
+# available: ae-ft2232 usb-blaster oocdlink usbjtag
+export INTERFACE ?= ae-ft2232
+
 # Read configuration file
-ifdef CONFIG
- CONFIGSUFFIX = $(CONFIG:config%=%)
+ifndef CONFIG
+$(info ERROR: Please use $(MAKE) CONFIG=... to specify at least one config file.)
+$(info Available configs:)
+$(foreach cfg,$(wildcard config-*),$(info $(patsubst %,  %,$(cfg))))
+$(info )
+$(info You may specify a programming interface using INTERFACE=...)
+$(info Available INTERFACEs (default/current: $(INTERFACE)):)
+$(foreach intf,$(wildcard interface/*),$(info $(patsubst interface/%.cfg,  %,$(intf))))
+$(info )
+$(error missing CONFIG parameter)
 else
- CONFIG = config
- CONFIGSUFFIX =
+ CONFIGSUFFIX = $(CONFIG:config%=%)
 endif
 
 # Enable verbose compilation with "make V=1"
@@ -43,6 +55,7 @@ include $(CONFIG)
 
 # Directory for all generated files
 OBJDIR := obj$(CONFIGSUFFIX)
+DEPDIR := .dep$(CONFIGSUFFIX)
 
 INCDIR = include
 
@@ -50,23 +63,29 @@ INCDIR = include
 FORMAT = binary
 
 # Linker script
-LINKERSCRIPT = lpc1754.ld
+LINKERSCRIPT = $(CONFIG_LD_SCRIPT)
 
 # Target file name (without extension).
 TARGET = $(OBJDIR)/sd2snes
 
+# Environment variables for openocd reuse
+export FW_START=$(CONFIG_FW_START)
+export FW_FILE=$(OBJDIR)/$(CONFIG_FW_FILE)
+export FLASH_SIZE=$(CONFIG_FLASH_SIZE)
+
+# Version
+include VERSION
 
 # List C source files here. (C dependencies are automatically generated.)
 SRC  = main.c ff.c ccsbcs.c clock.c uart.c power.c led.c timer.c
 SRC += printf.c spi.c fileops.c rtc.c fpga.c fpga_spi.c snes.c smc.c
 SRC += memory.c filetypes.c faulthandler.c sort.c crc32.c cic.c
 SRC += cli.c xmodem.c irq.c rle.c sdnative.c msu1.c crc16.c sysinfo.c
-SRC += cfg.c cheat.c yaml.c
+SRC += cfg.c cheat.c yaml.c savestate.c sgb.c
 
-#SRC += usbdesc.c usbcore.c usbuser.c usbhw.c cdcuser.c
+SRC += usbdesc.c usbcore.c usbuser.c usbhw.c cdcuser.c usbinterface.c
 
 # usbcontrol.c usb_hid.c usbhw_lpc.c usbinit.c usbstdreq.c
-
 
 # List Assembler source files here.
 #     Make them always end in a capital .S.  Files ending in a lowercase .s
@@ -109,7 +128,7 @@ CDEFS = -DF_OSC=$(CONFIG_MCU_FOSC)UL
 
 
 # Place -I options here
-CINCS =
+CINCS = -Iinclude
 
 
 # CPU-specific flags
@@ -132,7 +151,7 @@ NM = $(ARCH)-nm
 REMOVE = rm -f
 COPY = cp
 AWK = awk
-
+BIN2C = ../utils/bin2c
 
 #---------------- Compiler Options ----------------
 #  -g*:          generate debugging information
@@ -192,7 +211,7 @@ LST := $(patsubst %,$(OBJDIR)/%,$(CSRC:.c=.lst) $(ASRC:.S=.lst))
 
 
 # Compiler flags to generate dependency files.
-GENDEPFLAGS = -MMD -MP -MF .dep/$(@F).d
+GENDEPFLAGS = -MMD -MP -MF $(DEPDIR)/$(@F).d
 
 
 # Combine all necessary flags and optional flags.
@@ -201,17 +220,14 @@ ALL_CFLAGS = -I. $(CFLAGS) $(GENDEPFLAGS)
 ALL_ASFLAGS = -I. -x assembler-with-cpp $(ASFLAGS) $(CDEFS)
 
 
-
-
-
 # Default target.
 all: build
 
 build: elf bin hex
 	$(E) "  SIZE   $(TARGET).elf"
 	$(Q)$(ELFSIZE)|grep -v debug
-	cp $(TARGET).bin $(OBJDIR)/firmware.img
-	utils/genhdr $(OBJDIR)/firmware.img SNSD $(CONFIG_FWVER)
+	cp $(TARGET).bin $(OBJDIR)/$(CONFIG_FW_FILE)
+	utils/genhdr $(OBJDIR)/$(CONFIG_FW_FILE) $(CONFIG_FW_MAGIC) $(CONFIG_VERSION)
 
 elf: $(TARGET).elf
 bin: $(TARGET).bin
@@ -220,32 +236,31 @@ eep: $(TARGET).eep
 lss: $(TARGET).lss
 sym: $(TARGET).sym
 
-# # A little helper target for the maintainer =)
-# copy2card:
-#	cp $(TARGET).bin /mbed/hw_LPC1768.bin
-
-
 program: build
 	utils/lpcchksum $(TARGET).bin
-	openocd -f openocd-usb.cfg -f lpc1754.cfg -f flash.cfg
+	openocd -f openocd.cfg -f flash.cfg
 
 debug: build
-	openocd -f openocd-usb.cfg -f lpc1754.cfg
+	openocd -f openocd.cfg
 
 reset:
-	openocd -f openocd-usb.cfg -f lpc1754.cfg -f reset.cfg
+	openocd -f openocd.cfg -f reset.cfg
 
 # Display size of file.
 HEXSIZE = $(SIZE) --target=$(FORMAT) $(TARGET).hex
 ELFSIZE = $(SIZE) -A $(TARGET).elf
 
-
-
 # Generate autoconf.h from config
 .PRECIOUS : $(OBJDIR)/autoconf.h
-$(OBJDIR)/autoconf.h: $(CONFIG) | $(OBJDIR)
+$(OBJDIR)/autoconf.h: $(CONFIG) VERSION | $(OBJDIR)
 	$(E) "  CONF2H $(CONFIG)"
-	$(Q)$(AWK) -f conf2h.awk $(CONFIG) > $(OBJDIR)/autoconf.h
+	$(Q)$(AWK) -f conf2h.awk $(CONFIG) VERSION > $(OBJDIR)/autoconf.h
+
+# Generate embedded FPGA config from finished bitfile
+.PRECIOUS : $(OBJDIR)/cfgware.h
+$(OBJDIR)/cfgware.h: $(CONFIG_CFGWARE) | $(OBJDIR) $(OBJDIR)/autoconf.h
+	$(E) "  BIN2C $(CONFIG_CFGWARE)"
+	$(Q)$(BIN2C) "$(CONFIG_CFGWARE)" cfgware > $(OBJDIR)/cfgware.h
 
 # Create final output files from ELF output file.
 $(OBJDIR)/%.bin: $(OBJDIR)/%.elf
@@ -276,13 +291,13 @@ $(TARGET).elf : $(OBJ)
 
 
 # Compile: create object files from C source files.
-$(OBJDIR)/%.o : %.c | $(OBJDIR) $(OBJDIR)/autoconf.h
+$(OBJDIR)/%.o : %.c | $(OBJDIR) $(OBJDIR)/autoconf.h $(OBJDIR)/cfgware.h
 	$(E) "  CC     $<"
 	$(Q)$(CC) -c $(ALL_CFLAGS) $< -o $@
 
 
 # Compile: create assembler files from C source files.
-$(OBJDIR)/%.s : %.c | $(OBJDIR) $(OBJDIR)/autoconf.h
+$(OBJDIR)/%.s : %.c | $(OBJDIR) $(OBJDIR)/autoconf.h $(OBJDIR)/cfgware.h
 	$(CC) -S $(ALL_CFLAGS) $< -o $@
 
 
@@ -292,7 +307,7 @@ $(OBJDIR)/%.o : %.S | $(OBJDIR) $(OBJDIR)/autoconf.h
 	$(Q)$(CC) -c $(ALL_ASFLAGS) $< -o $@
 
 # Create preprocessed source for use in sending a bug report.
-$(OBJDIR)/%.i : %.c | $(OBJDIR) $(OBJDIR)/autoconf.h
+$(OBJDIR)/%.i : %.c | $(OBJDIR) $(OBJDIR)/autoconf.h $(OBJDIR)/cfgware.h
 	$(CC) -E -mmcu=$(MCU) -I. $(CFLAGS) $< -o $@
 
 # Create the output directory
@@ -313,17 +328,18 @@ clean_list :
 	$(Q)$(REMOVE) $(TARGET).lss
 	$(Q)$(REMOVE) $(OBJ)
 	$(Q)$(REMOVE) $(OBJDIR)/autoconf.h
+	$(Q)$(REMOVE) $(OBJDIR)/cfgware.h
 	$(Q)$(REMOVE) $(OBJDIR)/*.bin
-	$(Q)$(REMOVE) $(OBJDIR)/firmware.img
+	$(Q)$(REMOVE) $(OBJDIR)/${CONFIG_FW_FILE}
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)
 	$(Q)$(REMOVE) $(CSRC:.c=.d)
-	$(Q)$(REMOVE) .dep/*
+	$(Q)$(REMOVE) $(DEPDIR)/*
 	-$(Q)rmdir $(OBJDIR)
 
 # Include the dependency files.
--include $(shell mkdir .dep 2>/dev/null) $(wildcard .dep/*)
+-include $(info $(DEPDIR)) $(shell mkdir $(DEPDIR) 2>/dev/null) $(wildcard $(DEPDIR)/*)
 
 # Listing of phony targets.
 .PHONY : all begin finish end sizebefore sizeafter \

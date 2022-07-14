@@ -52,11 +52,11 @@ int main(int argc, char **argv) {
   FILE *f;
   size_t flen;
 
-  if(argc < 3) {
+  if(argc < 4) {
     printf("Usage: genhdr <input file> <signature> <version>\n"
            "  input file: file to be headered\n"
            "  signature : magic value at start of header (4-char string)\n"
-           "  version   : firmware version (decimal uint32)\n"
+           "  version   : firmware version (string) - 32-bit magic generated internally\n"
            "Output is written in place.\n");
     return 1;
   }
@@ -70,15 +70,15 @@ int main(int argc, char **argv) {
 
   if(flen+256 < flen) {
     printf("File too large ;)\n");
-    return 1;
-  }
-  char *remaining = NULL;
-  uint32_t version = (uint32_t)strtol(argv[3], &remaining, 0);
-  if(*remaining) {
-    printf("could not parse version number (remaining portion: %s)\n", remaining);
     fclose(f);
     return 1;
   }
+
+  /* calculate version magic CRC from version string */
+  uint32_t version = 0xffffffff;
+  version = crc_update(version, (uint8_t*)argv[3], strlen(argv[3]));
+  version = crc_reflect(version, 32);
+  version ^= 0xffffffff;
 
   if(strlen(argv[2]) > 4) {
     printf("Magic string '%s' too long. Truncated to 4 characters.\n", argv[2]);
@@ -86,6 +86,8 @@ int main(int argc, char **argv) {
   uint8_t *buf = malloc(flen+256);
   if(!buf) {
     perror("malloc");
+    fclose(f);
+    return -1;
   }
   memset(buf, 0xff, 256);
   fseek(f, 0, SEEK_SET);
@@ -122,5 +124,6 @@ int main(int argc, char **argv) {
   fseek(f, 0, SEEK_SET);
   fwrite(buf, 1, 256+flen, f);
   fclose(f);
+  free(buf);
   return 0;
 }

@@ -32,6 +32,15 @@
 
 #include <string.h>
 
+BYTE file_buf[512] __attribute__((aligned(4)));
+FATFS fatfs;
+FIL file_handle;
+FRESULT file_res;
+uint8_t file_lfn[258];
+uint8_t file_path[256];
+uint16_t file_block_off, file_block_max;
+enum filestates file_status;
+
 int newcard;
 
 void file_init() {
@@ -63,10 +72,10 @@ UINT file_read() {
   return bytes_read;
 }
 
-UINT file_write() {
+UINT file_write(size_t len) {
   UINT bytes_written;
-  file_res = f_write(&file_handle, file_buf, sizeof(file_buf), &bytes_written);
-  if(bytes_written < sizeof(file_buf)) {
+  file_res = f_write(&file_handle, file_buf, len, &bytes_written);
+  if(bytes_written < len) {
     printf("wrote less than expected - card full?\n");
   }
   return bytes_written;
@@ -118,7 +127,8 @@ FRESULT check_or_create_folder(TCHAR *dir) {
   fno.lfname = NULL;
   TCHAR buf[256];
   TCHAR *ptr = buf;
-  strncpy(buf, dir, sizeof(buf));
+  strncpy(buf, dir, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
   while(*(ptr++)) {
     if(*ptr == '/') {
       *ptr = 0;

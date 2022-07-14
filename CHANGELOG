@@ -1,3 +1,92 @@
+v1.10.3
+=======
+ * fixes:
+   - [Mk2] Revert S-DD1 bitfile to earlier build which happens to less expose a
+           timing hazard. This will need further examination for a proper fix.
+           Fixes severe glitches with S-DD1
+   - [All] Fix swapped logic terms in SA-1 and SuperFX RAM write cycles. Fixes
+           severe glitches on SA-1 and SuperFX on Mk.II units; The bug was also
+           present in the Pro firmware but didn't seem to have much of an effect
+   - [All] Fix game video mode setting in SuperCIC pair mode
+
+v1.10.2
+=======
+ * fixes:
+   - [Pro] fix wrong data ROM size on uPD96050 core -> F1 ROC II track is shown
+           properly.
+   - [Pro] fix S-DD1 address mirroring -> Star Ocean works
+   - [Pro] correct Cx4 core speed from 96MHz to 80MHz
+   - [All] apply volume boost after FPGA reconfiguration
+           (fixes MSU1 volume boost on Cx4, OBC1, SuperFX, SA-1, S-DD1)
+   - [All] fix S-DD1 writes going to the wrong address on concurrent MCU
+           accesses (saving not working in Star Ocean)
+   - [All] avoid potential data corruption on MCU writes (e.g. SPC loading)
+   - [All] Workaround for Super Nt not booting when CIC enters pair mode
+           successfully
+
+v1.10.1
+=======
+ * fix bug preventing boot on sd2snes Mk.III...
+
+v1.10.0
+=======
+ * add S-DD1 support by magno
+ * initial firmware release for sd2snes Mk.III ("sd2snes pro")
+ * fixes:
+   - fix memory corruption on BS-X loading
+   - reset S-RTC read state on all load and reset occasions
+
+v1.9.0
+======
+ * add SA-1 support by RedGuy
+ * add partial SRAM change detection for known games (SuperFX/SA-1) by RedGuy
+   this enables sensible autosaving for games that use part SRAM as work RAM,
+   without having to resort to periodic saving. I added some more games to the
+   known CRC list.
+   Note that this feature performs full ROM CRC calculation after loading and
+   running the ROM so firmware is unresponsive to in-game hooks and resetting
+   for a couple of seconds after the game has started. I have some ideas for
+   optimization.
+ * add option to always go back to menu when resetting
+ * add LED brightness setting
+ * add an option to start out with cheats enabled or disabled
+ * disable Satellaview emulation when a real Satellaview unit is present to
+   avoid conflicts and facilitate Satellaview development
+ * add SNES CPU <-> PPU clock phase alignment correction on reset
+   (fixes flickering sprite slabs e.g. giant Frog in Chrono Trigger, sprites in
+   Kirby Super Star, Star Ocean...)
+ * show current effective video mode (50/60Hz) in System Information
+ * fixes:
+   - earlier signal edge detection, improving stability on some consoles
+   - fix timing of auto region patching
+   - fix brightness patching for games that use HDMA to set brightness/blanking
+   - fix an occasional lockup when loading a game that uses OBC-1/SuperFX/SA-1
+   - fix SuperCIC pair mode entry for consoles with <= 3.072MHz CIC clock
+   - reset S-RTC register state on reset
+
+v1.8.0
+======
+ * add SuperFX support by RedGuy (v10)
+ * add support for ExLoROM (LoROM > 32 Mbits)
+ * disable in-game hooks by default
+ * add brightness patching to correct RGB output levels on 1CHIP consoles
+ * add mid-screen brightness change fixes for 1CHIP consoles:
+   - avoid change of brightness (bits 0-3) when forced blanking is used
+   - on bigger brightness change steps, substitute brightness 0
+     -> less sync distortion in Rudra's Treasure text boxes
+     -> visible shadow in A.S.P. Air Strike Patrol
+   - known issue: HDMA writes are not handled correctly
+ * some menu improvements:
+   - Menu entries can now be printed in grey when some condition is (not)
+     met. A function call is used to determine the status with the carry flag
+     as a boolean return value. Disabled menu entries can still be changed
+     for when they become active again.
+   - Also a change hook function can now be used in the menu structure. It is
+     called whenever the value is changed during setting, e.g. to immediately
+     reflect / preview the setting made.
+ * change versioning to eliminate the useless "v0." and gain a meaningful
+   subversion at the end
+
 v0.1.7e
 =======
  * fix critical DAC timing quirk causing audio distortion with MSU1

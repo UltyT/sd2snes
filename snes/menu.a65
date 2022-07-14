@@ -1,3 +1,5 @@
+.link page $c0
+
 #include "memmap.i65"
 #include "dma.i65"
 #include "stack.i65"
@@ -31,6 +33,60 @@ mainmenu:
   jsr pop_window
   rts
 
+filesel_contextmenu_file:
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$02
+  sta window_x
+  lda #$09
+  sta window_y
+  lda #60
+  sta window_w
+  lda #18
+  sta window_h
+  jsr push_window
+  jsr window_greyout
+  lda #$06
+  sta window_x
+  lda #$0b
+  sta window_y
+  phb
+    lda #^menu_enttab_filesel_context_file
+    pha
+    plb
+    ldx #!menu_enttab_filesel_context_file
+    jsr show_menu
+  plb
+  jsr pop_window
+  rts
+
+filesel_favorites_contextmenu:
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$02
+  sta window_x
+  lda #$09
+  sta window_y
+  lda #60
+  sta window_w
+  lda #18
+  sta window_h
+  jsr push_window
+  jsr window_greyout
+  lda #$06
+  sta window_x
+  lda #$0b
+  sta window_y
+  phb
+    lda #^menu_enttab_filesel_favorites_context
+    pha
+    plb
+    ldx #!menu_enttab_filesel_favorites_context
+    jsr show_menu
+  plb
+  jsr pop_window
+  rts
+
 ; menu_select:
 ; helper routine to select a list entry
 ; window and list items must be printed in advance
@@ -39,9 +95,14 @@ mainmenu:
 ; window_x, window_y, window_w, window_h: for select bar setup
 ; listsel_max: number of list entries to select from
 ; listsel_step: spacing between list entries (y text lines)
+; listsel_pickbutton: if 00, only allow button A to select an item,
+;                     if 01, allow button A and Y to select an item
 ;
-; return value: index of selected item in A
+; return value: index of selected item in A,
 ;               or #$FF if no item was selected
+;               listsel_pickbutton = 00 if button A was used,
+;               listsel_pickbutton = 01 if button Y was used,
+;               listsel_pickbutton = FF if button B (cancel) was used
 menu_select:
   php
   sep #$20 : rep #$10 : .as : .xl
@@ -80,9 +141,11 @@ menu_select_loop1
   lda pad_down
   bne menu_select_down
   lda pad_a
-  bne menu_select_item
+  bne menu_select_button_a
+  lda pad_y
+  bne menu_select_button_y
   lda pad_b
-  bne menu_select_none
+  bne menu_select_button_b
   bra menu_select_loop1
 menu_select_up
   lda listsel_sel
@@ -104,11 +167,22 @@ menu_select_down
   adc listsel_step
   sta bar_yl
   bra menu_select_loop1
-menu_select_item
+menu_select_button_a ; always allow button a
+  lda #$00
+  sta listsel_pickbutton
   lda listsel_sel
   bra menu_select_exit
-menu_select_none
+menu_select_button_y ; check if we should allow button y
+  lda listsel_pickbutton
+  cmp #$01
+  bne menu_select_loop1
+  lda #$01
+  sta listsel_pickbutton
+  lda listsel_sel
+  bra menu_select_exit
+menu_select_button_b ; cancel
   lda #$ff
+  sta listsel_pickbutton
 menu_select_exit
   plp
   rts
@@ -120,7 +194,7 @@ show_menu:
 ; x: offset of menu structure
 ; db: bank of menu structure
 ; local vars:
-#define _work_vars      $0c
+#define _locals         $0c
 #define w_numentries    $00
 #define w_max_lbl_len   $02
 #define w_max_opt_len   $04
@@ -188,12 +262,13 @@ show_menu:
     lda w_numentries
     sta listsel_max
 show_menu_loop:
+    stz listsel_pickbutton
     jsr menu_select_noinit
     cmp #$ff
     beq show_menu_out
     sta $211b
     stz $211b
-    lda #11
+    lda #MENU_ENTRY_SIZE
     sta $211c
     rep #$20 : .al
     lda $2134
@@ -210,6 +285,8 @@ show_menu_loop:
     beq show_menu_submenu
     cmp #MTYPE_FUNC
     beq show_menu_func
+    cmp #MTYPE_FUNC_CLOSE
+    beq show_menu_func_close
     cmp #MTYPE_VALUE
     bne show_menu_cont
     jmp show_menu_editvalue
@@ -233,6 +310,10 @@ show_menu_entries:
     pha
     plb
     ldx w_menu_addr
+    inx
+    inx
+    inx
+    inx
     lda w_max_lbl_len
     pha
     lda w_max_opt_len
@@ -296,6 +377,29 @@ show_menu_func_cont:
     ply
     jmp show_menu_cont
 
+show_menu_func_close:
+    phy
+    jsr push_window
+    jsr window_greyout
+    ply
+    phk
+    per show_menu_func_close_cont-1
+    rep #$20 : .al
+    lda [w_menu_addr], y
+    tax
+    sep #$20 : .as
+    iny
+    iny
+    lda [w_menu_addr], y
+    pha
+    phx
+    rtl
+show_menu_func_close_cont:
+    phy
+    jsr pop_window
+    ply
+    jmp show_menu_out
+
 show_menu_editvalue:
     phy
       phb
@@ -314,7 +418,7 @@ show_menu_editvalue:
       plb
     ply
     jmp show_menu_cont
-#undef _work_vars
+#undef _locals
 
 ; params:
 ; x: offset of menu structure
@@ -326,7 +430,7 @@ show_menu_editvalue:
 .byt "MENU_MEASURE"
 menu_measure:
 ; local variables
-#define _work_vars      $02
+#define _locals         $02
 #define w_max_kv_len    $00
 ; ==== return variables (same as parameter variables at the caller)
 #define r_numentries    $00
@@ -384,7 +488,7 @@ menu_measure_line_loop:
   sta StackParam(r_max_opt_len)
 + txa
   clc
-  adc #11
+  adc #MENU_ENTRY_SIZE
   tax
   bra menu_measure_line_loop
 menu_measure_out:
@@ -485,11 +589,11 @@ menu_meas_opt_set:
   and #$00ff
   plp
   rts
-#undef _work_vars
+#undef _locals
 
 .byt "MENU_PRINT_ENTRIES"
 menu_print_entries:
-#define _work_vars      $00
+#define _locals         $00
 ; params
 ; x: address of menu entry structure
 ; db: bank of menu entry structure
@@ -507,21 +611,24 @@ menu_print_ent_loop:
   inc
   inc
   sta @print_x
-  lda !4, x
+  lda !0, x ; entry type. 0 = termination
   bne +
   jmp menu_print_ent_out
-+ lda !5, x
++ lda !1, x ; address of option name string
   sta @print_src
-  lda !6, x
+  lda !2, x ; (address cont'd)
   sta @print_src+1
-  lda !7, x
+  lda !3, x ; bank of option name string
   sta @print_bank
+  jsr menu_check_disabled_func
   lda #$00
-  sta @print_pal
+  bcc +
+  lda #$06
++ sta @print_pal
   phx
   jsr hiprint
   plx
-  lda !4, x
+  lda !0, x
   cmp #MTYPE_SUBMENU
   bne +
   lda @print_done
@@ -535,7 +642,7 @@ menu_print_ent_loop:
   lda #^text_ellipse
   sta @print_bank
   phx
-  jsr hiprint
+    jsr hiprint
   plx
 + lda StackParam(p_max_lbl_len)
   clc
@@ -555,7 +662,7 @@ menu_print_ent_loop:
   jsr menu_print_opt_string
   txa
   clc
-  adc #11
+  adc #MENU_ENTRY_SIZE
   tax
   sep #$20 : .as
   lda @print_y
@@ -566,7 +673,7 @@ menu_print_ent_loop:
 menu_print_ent_out:
   FreeStack()
   rts
-#undef _work_vars
+#undef _locals
 
 .byt "MENU_PRINT_OPT_STRING"
 menu_print_opt_string_none:
@@ -575,7 +682,7 @@ menu_print_opt_string:
 ; params
 ; x: address of menu entry structure
 ; db: bank of menu entry structure
-#define _work_vars   $0b
+#define _locals      $0b
 #define w_entry_addr $00
 #define w_entry_bank $02
 #define w_kvpar_addr $03
@@ -585,23 +692,26 @@ menu_print_opt_string:
 #define w_kvtab_bank $0a
   AllocStack()
   rep #$20 : .al
-  lda !$c, x
+  lda !$8, x
   sta w_entry_addr
   lda #!stringbuf
   sta @print_src
   sep #$20 : .as
+  jsr menu_check_disabled_func
   lda #$01
-  sta @print_pal
+  bcc +
+  lda #$06
++ sta @print_pal
   lda #$40
   sta @print_count
   lda #^stringbuf
   sta @print_bank
-  lda !$e, x
+  lda !$a, x
   sta w_entry_bank
-;  lda !$4, x
+;  lda !$0, x
 ;  cmp #MTYPE_VALUE
 ;  bne menu_print_opt_string_none
-  lda !$b, x
+  lda !$7, x
   beq menu_print_opt_string_none
   cmp #$01
   bne menu_print_opt_string_02
@@ -647,13 +757,13 @@ menu_print_opt_string_03:
   cmp #$03
   bne menu_print_opt_string_04
   rep #$20 : .al
-  lda !$c, x
+  lda !$8, x
   sta @print_src
   tay
   sep #$20 : .as
-  lda !$8, x
+  lda !$4, x
   sta @print_count
-  lda !$e, x
+  lda !$a, x
   sta @print_bank
   phx
     phb
@@ -673,15 +783,15 @@ menu_print_opt_string_04:
   cmp #$05
   bne menu_print_opt_string_06
 menu_print_opt_string_keyval:
-  lda !$e, x              ; load address
-  ldy !$c, x              ; of current setting
+  lda !$a, x              ; load address
+  ldy !$8, x              ; of current setting
   sta w_kvpar_bank
   sty w_kvpar_addr
   rep #$20 : .al
   lda [w_kvpar_addr]      ; load currently set value
   ; mask for 8-bit key!
   phx
-    ldy !$b, x
+    ldy !$7, x
     sep #$10 : .xs
     cpy #$05
     beq +
@@ -689,10 +799,10 @@ menu_print_opt_string_keyval:
 +   rep #$10 : .xl
   plx
   sta w_kvpar_data
-  lda !$8, x              ; load pointer to kvtable
+  lda !$4, x              ; load pointer to kvtable
   sta w_kvtab_addr
   sep #$20 : .as
-  lda !$a, x
+  lda !$6, x
   sta w_kvtab_bank
   phb
     pha
@@ -701,7 +811,11 @@ menu_print_opt_string_keyval:
     ldy w_kvtab_addr
     lda w_kvpar_data
     jsr menu_kv_lookup
-    lda !$2, y
+; sanitize invalid option setting
+    cpy #$ffff
+    bne +
+    ldy w_kvtab_addr      ; invalid setting -> default to first entry
++   lda !$2, y
     pha                   ; save offset for right-align
       sta @print_src
       sep #$20 : .as
@@ -724,8 +838,11 @@ menu_print_opt_string_06:
   sta @stringbuf
   lda #$00
   sta @stringbuf+1
+  jsr menu_check_disabled_func
   lda #$02
-  sta @print_pal
+  bcc +
+  lda #$06
++ sta @print_pal
   lda #$10
   sta @print_count
   rep #$20 : .al
@@ -746,8 +863,11 @@ menu_print_opt_string_06:
   bra menu_print_opt_string_out
 menu_print_opt_string_07:
   sep #$20 : .as
+  jsr menu_check_disabled_func
   lda #$02
-  sta @print_pal
+  bcc +
+  lda #$06
++ sta @print_pal
   lda #$13
   sta @print_count
   rep #$20 : .al
@@ -808,7 +928,7 @@ menu_kv_lookup_out:
     pla
   plp
   rts
-#undef _work_vars
+#undef _locals
 
 ; menu_edit_value
 ; show a select/edit dialog depending on data type
@@ -819,8 +939,8 @@ menu_kv_lookup_out:
 ; x: address of menu entry
 .byt "MENU_EDIT_VALUE"
 menu_edit_value:
-; local variables (also available to callees above "#undef _work_vars")
-#define _work_vars      $0d
+; local variables (also available to callees above "#undef _locals")
+#define _locals         $11
 #define w_preset_addr   $00
 #define w_preset_bank   $02
 #define w_value_addr    $03
@@ -829,6 +949,9 @@ menu_edit_value:
 #define w_label_addr    $08
 #define w_label_bank    $0a
 #define w_value_len     $0b
+#define w_text_grey     $0d
+#define w_chgfunc_addr  $0e
+#define w_chgfunc_bank  $10
 ; returns:
 ; carry flag: 1=value set, 0=cancelled
   AllocStack()
@@ -839,12 +962,20 @@ menu_edit_value:
   sta w_preset_addr
   lda !$8, x
   sta w_value_addr
+  lda !14, x
+  sta w_chgfunc_addr
   lda #$0000 ; cleanup B for jump table offset
   sep #$20 : .as
+  jsr menu_check_disabled_func
+  ror
+  sta w_text_grey
   lda !$6, x
   sta w_preset_bank
   lda !$a, x
   sta w_value_bank
+  lda !16, x
+  sta w_chgfunc_bank
+; adjust selection bar to highlight parameter area
   lda @bar_xl
   clc
   adc @bar_wl
@@ -874,7 +1005,12 @@ menu_edit_value:
   bne -
   lda #$0000
   sta @MCU_CMD
-+ phx
+  bra menu_edit_value_skip_reset_chghook
++ lda [w_value_addr]
+  sta w_work_value
+  jsr menu_check_change_hook
+menu_edit_value_skip_reset_chghook:
+  phx
     lda #$0000
     jsr set_bar_color
   plx
@@ -903,7 +1039,6 @@ menu_value_dialog_u8:
     rep #$10 : .xl
     sep #$20 : .as
     phb
-; adjust selection bar to highlight parameter area
 -     jsr waitblank
       jsr read_pad
       jsr printtime
@@ -1007,7 +1142,10 @@ menu_value_dialog_u8_print:
         inc
         sta print_y
         lda #$01
-        sta print_pal
+        bit w_text_grey
+        bpl +
+        lda #$06
++       sta print_pal
         jsr hiprint
       plb
       brl -
@@ -1134,7 +1272,10 @@ menu_value_dialog_u16_print:
         inc
         sta print_y
         lda #$01
-        sta @print_pal
+        bit w_text_grey
+        bpl +
+        lda #$06
++       sta print_pal
         jsr hiprint
       plb
       rep #$20 : .al
@@ -1214,22 +1355,25 @@ menu_value_dialog_kv8_cancel:
       lda #!space64
       sta @print_src
       sep #$20 : .as
+      lda @bar_yl
+      inc
+      sta @print_y
+      lda @window_x
+      clc
+      adc @window_w
+      clc
+      sbc w_value_len
+      dec
+      sta @print_x
+      lda w_value_len
+      sta @print_count
       phy
-        lda @bar_yl
-        inc
-        sta @print_y
-        lda @window_x
-        clc
-        adc @window_w
-        clc
-        sbc w_value_len
-        dec
-        sta @print_x
-        lda w_value_len
-        sta @print_count
         jsr hiprint
       ply
       rep #$20 : .al
+      lda !$0, y
+      and #$00ff
+      sta w_work_value
       lda !$2, y
       sta @print_src
       sta w_label_addr
@@ -1237,17 +1381,21 @@ menu_value_dialog_kv8_cancel:
       lda !$4, y
       sta @print_bank
       lda #$01
-      sta @print_pal
+      bit w_text_grey
+      bpl +
+      lda #$06
++     sta @print_pal
       phy
-      phb
         ldy w_label_addr
         lda @print_bank
-        pha
+        phb
+          pha
+          plb
+          jsr right_align
+          jsr hiprint
         plb
-        jsr right_align
-        jsr hiprint
-      plb
       ply
+      jsr menu_check_change_hook
       brl menu_value_dialog_kv8_loop
 menu_value_dialog_kv8_cont:
     plb
@@ -1290,7 +1438,56 @@ menu_value_dialog_time_cancel:
   plp
   clc
   rts
-#undef _work_vars
+
+menu_check_change_hook:
+  php
+  sep #$20 : .as
+  ; call function, if defined, to perform some action during value selection
+    lda w_chgfunc_addr
+    ora w_chgfunc_addr + 1
+    ora w_chgfunc_bank
+    clc
+    beq menu_check_change_hook_exit
+  ; push long return address for after function call
+    phk
+    per menu_check_change_hook_exit-1
+  ; push long address of changeHook function
+    lda w_chgfunc_bank
+    pha
+    lda w_chgfunc_addr + 1
+    pha
+    lda w_chgfunc_addr
+    pha
+    lda w_work_value
+    rtl ; call the changeHook function
+menu_check_change_hook_exit:
+  plp
+  rts
+
+
+#undef _locals
+
+menu_check_disabled_func:
+  .as
+; call function, if defined, to determine whether menu entry should be drawn as active or inactive
+  lda !20, x
+  ora !21, x
+  ora !22, x
+  clc
+  beq menu_check_disabled_func_exit
+; push long return address for after function call
+  phk
+  per menu_check_disabled_func_exit-1
+; push long address of isDisabled function
+  lda !22, x
+  pha
+  lda !21, x
+  pha
+  lda !20, x
+  pha
+  rtl ; call the isDisabled function
+menu_check_disabled_func_exit:
+  rts
 
 ; jump table to different data type edit dialogs
 menu_tab_edit_value_dialogs:

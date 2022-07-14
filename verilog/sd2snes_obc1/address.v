@@ -19,7 +19,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 module address(
   input CLK,
-  input [7:0] featurebits,  // peripheral enable/disable
+  input [15:0] featurebits, // peripheral enable/disable
   input [2:0] MAPPER,       // MCU detected mapper
   input [23:0] SNES_ADDR,   // requested address from SNES
   input [7:0] SNES_PA,      // peripheral address from SNES
@@ -33,11 +33,13 @@ module address(
   input [23:0] ROM_MASK,
   output msu_enable,
   output r213f_enable,
+  output r2100_hit,
   output snescmd_enable,
   output nmicmd_enable,
   output return_vector_enable,
   output branch1_enable,
   output branch2_enable,
+  output branch3_enable,
   output obc1_enable
 );
 
@@ -58,8 +60,7 @@ wire [23:0] SRAM_SNES_ADDR;
 /* HiROM:   SRAM @ Bank 0x30-0x3f, 0xb0-0xbf
             Offset 6000-7fff */
 
-assign IS_ROM = ((!SNES_ADDR[22] & SNES_ADDR[15])
-                 |(SNES_ADDR[22]));
+assign IS_ROM = ~SNES_ROMSEL;
 
 assign IS_SAVERAM = SAVERAM_MASK[0]
                     &(((MAPPER == 3'b000
@@ -109,10 +110,13 @@ assign ROM_HIT = IS_ROM | IS_WRITABLE;
 
 assign msu_enable = featurebits[FEAT_MSU1] & (!SNES_ADDR[22] && ((SNES_ADDR[15:0] & 16'hfff8) == 16'h2000));
 assign r213f_enable = featurebits[FEAT_213F] & (SNES_PA == 8'h3f);
+assign r2100_hit = (SNES_PA == 8'h00);
+
 assign obc1_enable = (~SNES_ADDR[22]) & (SNES_ADDR[15:11] == 5'b01111);
 assign snescmd_enable = ({SNES_ADDR[22], SNES_ADDR[15:9]} == 8'b0_0010101);
 assign nmicmd_enable = (SNES_ADDR == 24'h002BF2);
-assign return_vector_enable = (SNES_ADDR == 24'h002A5A);
-assign branch1_enable = (SNES_ADDR == 24'h002A13);
-assign branch2_enable = (SNES_ADDR == 24'h002A4D);
+assign return_vector_enable = (SNES_ADDR == 24'h002A6C);
+assign branch1_enable = (SNES_ADDR == 24'h002A1F);
+assign branch2_enable = (SNES_ADDR == 24'h002A59);
+assign branch3_enable = (SNES_ADDR == 24'h002A5E);
 endmodule

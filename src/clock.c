@@ -18,11 +18,7 @@ void clock_init() {
 /* set flash access time to 5 clks (80<f<=100MHz) */
   setFlashAccessTime(5);
 
-/* setup PLL0 for 86MHz
-   Base clock: 12MHz
-   Multiplier:   23
-   Pre-Divisor:   2
-   Divisor:       6
+/* setup PLL0 for 96MHz
    First, disable and disconnect PLL0.
 */
   clock_disconnect();
@@ -44,20 +40,16 @@ void clock_init() {
    connect PLL0
    done
  */
+  disconnectPLL1();
+  disablePLL1();
+
   enableMainOsc();
   setClkSrc(CLKSRC_MAINOSC);
   setPLL0MultPrediv(CONFIG_CLK_MULT, CONFIG_CLK_PREDIV);
   enablePLL0();
   setCCLKDiv(CONFIG_CLK_CCLKDIV);
+  setUSBCLKDiv(CONFIG_USB_DIV);
   connectPLL0();
-
-
-/* configure PLL1 for USB operation */
-  disconnectPLL1();
-  disablePLL1();
-  LPC_SC->PLL1CFG = 0x23;
-  enablePLL1();
-  connectPLL1();
 
 }
 
@@ -91,8 +83,8 @@ void disconnectPLL0() {
   PLL0feed();
 }
 
-void setPLL1MultPrediv(uint16_t mult, uint8_t prediv) {
-  LPC_SC->PLL1CFG=PLL_MULT(mult) | PLL_PREDIV(prediv);
+void setPLL1MultDiv(uint8_t mult, uint8_t div) {
+  LPC_SC->PLL1CFG=PLL1_MULT(mult) | PLL1_DIV(div);
   PLL1feed();
 }
 
@@ -119,6 +111,10 @@ void disconnectPLL1() {
 
 void setCCLKDiv(uint8_t div) {
   LPC_SC->CCLKCFG=CCLK_DIV(div);
+}
+
+void setUSBCLKDiv(uint8_t div) {
+  LPC_SC->USBCLKCFG=USB_DIV(div);
 }
 
 void enableMainOsc() {

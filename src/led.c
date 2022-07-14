@@ -6,61 +6,61 @@
 #include "led.h"
 #include "cli.h"
 #include "fileops.h"
+#include "cfg.h"
+#include "config.h"
 
-static uint8_t led_bright[16]={255,253,252,251,249,247,244,239,232,223,210,191,165,127,74,0};
+static uint16_t led_bright[16]={60000, 59920, 59871, 59794,
+                                59669, 59469, 59148, 58633,
+                                57806, 56481, 54354, 50942,
+                                45469, 36688, 22601,     0};
 
 int led_rdyledstate = 0;
 int led_readledstate = 0;
 int led_writeledstate = 0;
 int led_pwmstate = 0;
 
-/* LED connections (Rev.C)
-
-   LED    color  IO    PWM
-   ---------------------------
-   ready  green  P2.4  PWM1[5]
-   read   yellow P2.5  PWM1[6]
-   write  red    P1.23 PWM1[4]
-*/
+extern cfg_t CFG;
 
 void rdyled(unsigned int state) {
   if(led_pwmstate) {
-    rdybright(state?15:0);
+    rdybright(state ? CFG.led_brightness : 0);
   } else {
-    BITBAND(LPC_GPIO2->FIODIR, 4) = state;
+    BITBAND(LED_READY_REG->FIODIR, LED_READY_BIT) = state;
   }
   led_rdyledstate = state;
 }
 
 void readled(unsigned int state) {
   if(led_pwmstate) {
-    readbright(state?15:0);
+    readbright(state ? CFG.led_brightness : 0);
   } else {
-    BITBAND(LPC_GPIO2->FIODIR, 5) = state;
+    BITBAND(LED_READ_REG->FIODIR, LED_READ_BIT) = state;
   }
   led_readledstate = state;
 }
 
 void writeled(unsigned int state) {
   if(led_pwmstate) {
-    writebright(state?15:0);
+    writebright(state ? CFG.led_brightness : 0);
   } else {
-    BITBAND(LPC_GPIO1->FIODIR, 23) = state;
+    BITBAND(LED_WRITE_REG->FIODIR, LED_WRITE_BIT) = state;
   }
   led_writeledstate = state;
 }
 
 void rdybright(uint8_t bright) {
-  LPC_PWM1->MR5 = led_bright[(bright & 15)];
-  BITBAND(LPC_PWM1->LER, 5) = 1;
+  LED_READY_MR = led_bright[(bright & 15)];
+  BITBAND(LPC_PWM1->LER, LED_READY_MRNUM) = 1;
 }
+
 void readbright(uint8_t bright) {
-  LPC_PWM1->MR6 = led_bright[(bright & 15)];
-  BITBAND(LPC_PWM1->LER, 6) = 1;
+  LED_READ_MR = led_bright[(bright & 15)];
+  BITBAND(LPC_PWM1->LER, LED_READ_MRNUM) = 1;
 }
+
 void writebright(uint8_t bright) {
-  LPC_PWM1->MR4 = led_bright[(bright & 15)];
-  BITBAND(LPC_PWM1->LER, 4) = 1;
+  LED_WRITE_MR = led_bright[(bright & 15)];
+  BITBAND(LPC_PWM1->LER, LED_WRITE_MRNUM) = 1;
 }
 
 void led_clkout32(uint32_t val) {
@@ -102,46 +102,44 @@ void led_panic(uint8_t led_states) {
 }
 
 void led_pwm() {
-/* Rev.C P2.4, P2.5, P1.23 */
-  BITBAND(LPC_PINCON->PINSEL4, 9) = 0;
-  BITBAND(LPC_PINCON->PINSEL4, 8) = 1;
+  LED_READY_PINSEL = (LED_READY_PINSEL & ~(0b11 << LED_READY_PINSELSHIFT))
+                      | (LED_READY_PINSELVAL << LED_READY_PINSELSHIFT);
+  LED_READ_PINSEL = (LED_READ_PINSEL & ~(0b11 << LED_READ_PINSELSHIFT))
+                      | (LED_READ_PINSELVAL << LED_READ_PINSELSHIFT);
+  LED_WRITE_PINSEL = (LED_WRITE_PINSEL & ~(0b11 << LED_WRITE_PINSELSHIFT))
+                      | (LED_WRITE_PINSELVAL << LED_WRITE_PINSELSHIFT);
 
-  BITBAND(LPC_PINCON->PINSEL4, 11) = 0;
-  BITBAND(LPC_PINCON->PINSEL4, 10) = 1;
+  BITBAND(LPC_PWM1->PCR, LED_READY_PCRBIT) = 1;
+  BITBAND(LPC_PWM1->PCR, LED_READ_PCRBIT) = 1;
+  BITBAND(LPC_PWM1->PCR, LED_WRITE_PCRBIT) = 1;
 
-  BITBAND(LPC_PINCON->PINSEL3, 15) = 1;
-  BITBAND(LPC_PINCON->PINSEL3, 14) = 0;
+  BITBAND(LED_READY_REG->FIODIR, LED_READY_BIT) = 1;
+  BITBAND(LED_READ_REG->FIODIR, LED_READ_BIT) = 1;
+  BITBAND(LED_WRITE_REG->FIODIR, LED_WRITE_BIT) = 1;
 
-  BITBAND(LPC_PWM1->PCR, 12) = 1;
-  BITBAND(LPC_PWM1->PCR, 13) = 1;
-  BITBAND(LPC_PWM1->PCR, 14) = 1;
 
   led_pwmstate = 1;
 }
 
 void led_std() {
-  BITBAND(LPC_PINCON->PINSEL4, 9) = 0;
-  BITBAND(LPC_PINCON->PINSEL4, 8) = 0;
+  LED_READY_PINSEL = (LED_READY_PINSEL & ~(0b11 << LED_READY_PINSELSHIFT));
+  LED_READ_PINSEL  = (LED_READ_PINSEL  & ~(0b11 << LED_READ_PINSELSHIFT));
+  LED_WRITE_PINSEL = (LED_WRITE_PINSEL & ~(0b11 << LED_WRITE_PINSELSHIFT));
 
-  BITBAND(LPC_PINCON->PINSEL4, 11) = 0;
-  BITBAND(LPC_PINCON->PINSEL4, 10) = 0;
-
-  BITBAND(LPC_PINCON->PINSEL3, 15) = 0;
-  BITBAND(LPC_PINCON->PINSEL3, 14) = 0;
-
-  BITBAND(LPC_PWM1->PCR, 12) = 0;
-  BITBAND(LPC_PWM1->PCR, 13) = 0;
-  BITBAND(LPC_PWM1->PCR, 14) = 0;
+  BITBAND(LPC_PWM1->PCR, LED_READY_PCRBIT) = 0;
+  BITBAND(LPC_PWM1->PCR, LED_READ_PCRBIT) = 0;
+  BITBAND(LPC_PWM1->PCR, LED_WRITE_PCRBIT) = 0;
 
   led_pwmstate = 0;
 }
 
 void led_init() {
 /* power is already connected by default */
-/* set PCLK divider to 8 */
+/* set PCLK divider for PWM1 to CCLK / 8 */
   BITBAND(LPC_SC->PCLKSEL0, 13) = 1;
   BITBAND(LPC_SC->PCLKSEL0, 12) = 1;
-  LPC_PWM1->MR0 = 255;
+/* PWM rate 200Hz -> 60000 counts */
+  LPC_PWM1->MR0 = 60000;
   BITBAND(LPC_PWM1->LER, 0) = 1;
   BITBAND(LPC_PWM1->TCR, 0) = 1;
   BITBAND(LPC_PWM1->TCR, 3) = 1;
@@ -184,4 +182,11 @@ void led_error() {
     }
     framecount++;
   }
+}
+
+void led_set_brightness(uint8_t bright) {
+  rdybright(led_rdyledstate ? bright : 0);
+  readbright(led_readledstate ? bright : 0);
+  writebright(led_writeledstate ? bright : 0);
+  CFG.led_brightness = bright;
 }

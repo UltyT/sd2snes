@@ -19,10 +19,11 @@
 //////////////////////////////////////////////////////////////////////////////////
 module address(
   input CLK,
-  input [7:0] featurebits,
+  input [15:0] featurebits,
   input [2:0] MAPPER,       // MCU detected mapper
   input [23:0] SNES_ADDR,   // requested address from SNES
   input [7:0] SNES_PA,      // peripheral address from SNES
+  input SNES_ROMSEL,        // ROMSEL from SNES
   output [23:0] ROM_ADDR,   // Address to request from SRAM0
   output ROM_HIT,           // want to access RAM0
   output IS_SAVERAM,        // address/CS mapped as SRAM?
@@ -34,16 +35,19 @@ module address(
   output cx4_enable,
   output cx4_vect_enable,
   output r213f_enable,
+  output r2100_hit,
   output snescmd_enable,
   output nmicmd_enable,
   output return_vector_enable,
   output branch1_enable,
-  output branch2_enable
+  output branch2_enable,
+  output branch3_enable
 );
 
 parameter [2:0]
   FEAT_MSU1 = 3,
-  FEAT_213F = 4
+  FEAT_213F = 4,
+  FEAT_2100 = 6
 ;
 
 wire [23:0] SRAM_SNES_ADDR;
@@ -54,8 +58,7 @@ wire [23:0] SRAM_SNES_ADDR;
    - SRAM @ 70-77:0000-7fff
  */
 
-assign IS_ROM = ((!SNES_ADDR[22] & SNES_ADDR[15])
-                 |(SNES_ADDR[22]));
+assign IS_ROM = ~SNES_ROMSEL;
 
 assign IS_SAVERAM = |SAVERAM_MASK & (~SNES_ADDR[23] & &SNES_ADDR[22:20] & ~SNES_ADDR[19] & ~SNES_ADDR[15]);
 
@@ -79,11 +82,13 @@ assign cx4_enable = cx4_enable_w;
 
 assign cx4_vect_enable = &SNES_ADDR[15:5];
 
-assign r213f_enable = featurebits[FEAT_213F] & (SNES_PA == 9'h3f);
+assign r213f_enable = featurebits[FEAT_213F] & (SNES_PA == 8'h3f);
+assign r2100_hit = (SNES_PA == 8'h00);
 
 assign snescmd_enable = ({SNES_ADDR[22], SNES_ADDR[15:9]} == 8'b0_0010101);
 assign nmicmd_enable = (SNES_ADDR == 24'h002BF2);
-assign return_vector_enable = (SNES_ADDR == 24'h002A5A);
-assign branch1_enable = (SNES_ADDR == 24'h002A13);
-assign branch2_enable = (SNES_ADDR == 24'h002A4D);
+assign return_vector_enable = (SNES_ADDR == 24'h002A6C);
+assign branch1_enable = (SNES_ADDR == 24'h002A1F);
+assign branch2_enable = (SNES_ADDR == 24'h002A59);
+assign branch3_enable = (SNES_ADDR == 24'h002A5E);
 endmodule

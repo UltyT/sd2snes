@@ -34,7 +34,7 @@
 #define DSPFW_1B ((const uint8_t*)"/sd2snes/dsp1b.bin")
 #define DSPFW_ST0010 ((const uint8_t*)"/sd2snes/st0010.bin")
 
-typedef struct _snes_header {
+typedef struct __attribute__ ((__packed__)) _snes_header {
   uint8_t maker[2];     /* 0xB0 */
   uint8_t gamecode[4];  /* 0xB2 */
   uint8_t fixed_00[7];  /* 0xB6 */
@@ -67,8 +67,8 @@ typedef struct _snes_header {
   uint16_t vect_brk8;   /* 0xFE */
 } snes_header_t;
 
-typedef struct _snes_romprops {
-  uint16_t offset;            /* start of actual ROM image */
+typedef struct __attribute__ ((__packed__)) _snes_romprops {
+  uint32_t offset;            /* start of actual ROM image */
   uint8_t mapper_id;          /* FPGA mapper */
   uint8_t pad1;               /* for alignment */
   uint32_t expramsize_bytes;  /* ExpRAM size in bytes */
@@ -87,7 +87,10 @@ typedef struct _snes_romprops {
   uint8_t has_sa1;            /* SA-1 presence flag */
   uint8_t has_sdd1;           /* S-DD1 presence flag */
   uint8_t has_spc7110;        /* SPC7110 presence flag */
-  uint8_t fpga_features;      /* feature/peripheral enable bits */
+  uint8_t has_combo;          /* Multi game presence flag */
+  uint32_t srambase;          /* saveram base address */
+  uint32_t sramsize_bytes;    /* saveram size in bytes */
+  uint16_t fpga_features;     /* feature/peripheral enable bits */
   uint16_t fpga_dspfeat;      /* DSP configuration bits */
   uint8_t region;             /* game region (derived from destination code) */
   uint32_t load_address;      /* where to load the ROM image */
@@ -97,7 +100,7 @@ typedef struct _snes_romprops {
   snes_header_t header;       /* original header from ROM image */
 } snes_romprops_t;
 
-void smc_id(snes_romprops_t*);
-uint8_t smc_headerscore(uint32_t addr, snes_header_t* header);
+void smc_id(snes_romprops_t*, uint32_t file_offset);
+uint8_t smc_headerscore(uint32_t addr, snes_header_t* header, uint32_t file_offset);
 
 #endif

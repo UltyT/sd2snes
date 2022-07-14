@@ -48,14 +48,21 @@ memory.c: RAM operations
 #include "cli.h"
 #include "cheat.h"
 #include "rtc.h"
+#include "savestate.h"
+#include "sgb.h"
 
 #include <string.h>
 char* hex = "0123456789ABCDEF";
 
 extern snes_romprops_t romprops;
+extern uint32_t saveram_crc_old, saveram_crc, saveram_offset;
+extern sgb_romprops_t sgb_romprops;
 extern uint32_t saveram_crc_old;
+extern uint8_t sram_crc_valid;
+extern uint8_t sram_crc_init;
+extern uint32_t sram_crc_romsize;
 extern cfg_t CFG;
-extern status_t ST;
+extern snes_status_t STS;
 
 void sram_hexdump(uint32_t addr, uint32_t len) {
   static uint8_t buf[16];
@@ -158,7 +165,7 @@ void sram_readlongblock(uint32_t* buf, uint32_t addr, uint16_t count) {
   FPGA_DESELECT();
 }
 
-void sram_readblock(void* buf, uint32_t addr, uint16_t size) {
+uint16_t sram_readblock(void* buf, uint32_t addr, uint16_t size) {
   uint16_t count=size;
   uint8_t* tgt = buf;
   set_mcu_addr(addr);
@@ -169,6 +176,7 @@ void sram_readblock(void* buf, uint32_t addr, uint16_t size) {
     *(tgt++) = FPGA_RX_BYTE();
   }
   FPGA_DESELECT();
+  return size;
 }
 
 uint16_t sram_readstrn(void* buf, uint32_t addr, uint16_t size) {
@@ -211,7 +219,7 @@ uint16_t sram_writestrn(void* buf, uint32_t addr, uint16_t size) {
   return elemcount;
 }
 
-void sram_writeblock(void* buf, uint32_t addr, uint16_t size) {
+uint16_t sram_writeblock(void* buf, uint32_t addr, uint16_t size) {
   uint16_t count = size;
   uint8_t* src = buf;
   set_mcu_addr(addr);
@@ -222,14 +230,21 @@ void sram_writeblock(void* buf, uint32_t addr, uint16_t size) {
     FPGA_WAIT_RDY();
   }
   FPGA_DESELECT();
+  return size;
 }
 
+char current_filename[258];
 uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   UINT bytes_read;
   DWORD filesize;
   UINT count=0;
+  uint8_t is_menu = (filename == (uint8_t*)MENU_FILENAME);
   tick_t ticksstart, ticks_total=0;
   ticksstart=getticks();
+
+  // copy the full name and path
+  strncpy(current_filename, (char *)filename, sizeof(current_filename)-1);
+
   printf("%s\n", filename);
   file_open(filename, FA_READ);
   if(file_res) {
@@ -237,23 +252,64 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
     uart_putc(0x30+file_res);
     return 0;
   }
+  filesize = file_handle.fsize; // won't be correct for combo roms
+  
+  uint32_t file_offset = 0;
+  if(flags & LOADROM_WITH_COMBO) {
+    printf("Combo Header Check...");
+    // seek to the proper slot.  slots are naturally aligned on 1MB boundaries.
+    file_offset = 0x100000 * snescmd_readbyte(SNESCMD_MCU_CMD + 1);
+    printf(" file_offset=0x%lx", file_offset);
+    printf(" OK.\n");
+  }
+
+  if(flags & LOADROM_WITH_COMBO) {
+    printf("Combo Transition...");
+    uint32_t romslot = snescmd_readbyte(SNESCMD_MCU_CMD + 1);
+    romprops.offset += romslot << 20;
+    printf(" romslot=0x%lx", romslot);
+    printf(" offset=0x%lx", romprops.offset);
+    
+    // force has_combo since only slot 00 has the matching carttype
+    romprops.has_combo = 1;
+    printf(" OK.\n");
+  }
+  /* SGB detect and file management */
+  uint8_t *sgb_filename = filename;
+  DWORD sgb_filesize = file_handle.fsize;
+  sgb_id(&sgb_romprops, sgb_filename);
+  if (!sgb_update_file(&filename)) return 0;
+
   filesize = file_handle.fsize;
-  smc_id(&romprops);
+  smc_id(&romprops, file_offset);
   file_close();
 
-  if(filename == (uint8_t*)"/sd2snes/menu.bin") {
-    fpga_set_features(romprops.fpga_features | FEAT_CMD_UNLOCK);
+  /* SGB assign the SGB FPGA file and relocate the snes image to the 512KB RAM */
+  if (!sgb_update_romprops(&romprops, sgb_filename)) return 0;
+
+  uint16_t fpga_features_preload = romprops.fpga_features | FEAT_CMD_UNLOCK | FEAT_2100_LIMIT_NONE;
+  if(is_menu) {
+    printf("Setting menu features...");
+    fpga_set_features(fpga_features_preload);
+    printf("OK.\n");
   }
   /* TODO check prerequisites and set error code here */
-  if(flags & LOADROM_WAIT_SNES) snes_set_snes_cmd(0x55);
+  if(flags & LOADROM_WAIT_SNES) {
+    printf("Setting cmd=0x55...");
+    snes_set_snes_cmd(0x55);
+    printf("OK.\n");
+  }
   /* reconfigure FPGA if necessary */
   if(flags & LOADROM_WAIT_SNES) {
+    printf("Checking if ok to reconfigure...");
     while(snes_get_mcu_cmd() != SNES_CMD_FPGA_RECONF);
+    printf("OK.\n");
   }
-  if(romprops.fpga_conf) {
-    printf("reconfigure FPGA with %s...\n", romprops.fpga_conf);
-    fpga_pgm((uint8_t*)romprops.fpga_conf);
-    fpga_set_features(romprops.fpga_features | FEAT_CMD_UNLOCK);
+  if(romprops.fpga_conf || (flags & LOADROM_WITH_FPGA)) {
+    const uint8_t *fpga_conf = romprops.fpga_conf ? romprops.fpga_conf : FPGA_BASE;
+    printf("reconfigure FPGA with %s...\n", fpga_conf);
+    fpga_pgm((uint8_t*)fpga_conf);
+    fpga_set_features(fpga_features_preload);
   }
   if(flags & LOADROM_WAIT_SNES) snes_set_snes_cmd(0x77);
   set_mcu_addr(base_addr + romprops.load_address);
@@ -261,6 +317,7 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   ff_sd_offload=1;
   sd_offload_tgt=0;
   f_lseek(&file_handle, romprops.offset);
+  uint32_t total_bytes_read = 0;
   for(;;) {
     ff_sd_offload=1;
     sd_offload_tgt=0;
@@ -269,8 +326,15 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
     if(!(count++ % 512)) {
       uart_putc('.');
     }
+    total_bytes_read += bytes_read;
+    // FIXME: can we do this in the general (non-combo) case?
+    // FIXME: what does the condition below do that doubles romsize_bytes until it hits the file limit?  Do some games
+    // misreport size?  Or is this for BSX?
+    if((flags & LOADROM_WITH_COMBO) && (total_bytes_read >= romprops.romsize_bytes)) break;
   }
+  uart_putc('\n');
   file_close();
+
   printf("rom header map: %02x; mapper id: %d\n", romprops.header.map, romprops.mapper_id);
   ticks_total=getticks()-ticksstart;
   printf("%u ticks total\n", ticks_total);
@@ -313,28 +377,75 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   uint32_t rammask;
   uint32_t rommask;
 
-  while(filesize > (romprops.romsize_bytes + romprops.offset)) {
+  while(!romprops.has_combo && filesize > (romprops.romsize_bytes + romprops.offset)) {
     romprops.romsize_bytes <<= 1;
   }
 
-  if(romprops.header.ramsize == 0) {
+  if (romprops.has_sa1 && romprops.header.carttype == 0x36 && romprops.header.ramsize) {
+    // move iram into saveram for special carts with no bwram
+    romprops.header.ramsize = 1;
+    romprops.ramsize_bytes = 0x800;
+    // override any changes to this so we capture full sram
+    romprops.srambase       = 0;
+    romprops.sramsize_bytes = romprops.ramsize_bytes;
+    rammask = 1;
+  } else if(romprops.header.ramsize == 0) {
     rammask = 0;
   } else {
     rammask = romprops.ramsize_bytes - 1;
   }
   rommask = romprops.romsize_bytes - 1;
+  
+  uint8_t ramslot = 0;
+  if (romprops.has_combo) {
+    ramslot = sram_readbyte((romprops.mapper_id == 0 || romprops.mapper_id == 2) ? 0xFFDA : 0x7FDA);
+  }
+  
+  printf("ramsize=%x ramslot=%hx rammask=%lx\nromsize=%x rommask=%lx\n", romprops.header.ramsize, ramslot, rammask, romprops.header.romsize, rommask);
+
+  /* SGB setup romprops and load SRAM */
+  sgb_load_sram(sgb_filename);
+
+  /* SGB update local file properties */
+  if (sgb_romprops.has_sgb) {
+    /* reset the filename to match the GB file */
+    filename = sgb_filename;
+    filesize = sgb_filesize;
+
+    /* update SaveRAM properties */
+    romprops.ramsize_bytes = (CFG.sgb_enable_state && sgb_romprops.ramsize_bytes <= 64 * 1024) ? (128 * 1024) : sgb_romprops.ramsize_bytes;
+    romprops.srambase = sgb_romprops.srambase;
+    romprops.sramsize_bytes = (CFG.sgb_enable_state && sgb_romprops.ramsize_bytes <= 64 * 1024) ? (128 * 1024) : sgb_romprops.sramsize_bytes;
+
+    rammask = sgb_romprops.ramsize_bytes ? (sgb_romprops.ramsize_bytes - 1) : 0;
+    rommask = sgb_romprops.romsize_bytes ? (sgb_romprops.romsize_bytes - 1) : 0;
+  }
+
+  /* SGB load GB RTC */
+  sgb_gtc_load(sgb_filename);
+
   printf("ramsize=%x rammask=%lx\nromsize=%x rommask=%lx\n", romprops.header.ramsize, rammask, romprops.header.romsize, rommask);
   set_saveram_mask(rammask);
+  // don't set these for special chips as it may break from not supporting the feature
+  if (  !romprops.fpga_conf
+      || romprops.fpga_conf == FPGA_BASE
+      || romprops.fpga_conf == FPGA_DSP) {
+      set_saveram_base(ramslot);
+  }
   set_rom_mask(rommask);
   readled(0);
 
+  printf("gsu=%x sa1=%x srambase=%lx sramsize=%lx\n", romprops.has_gsu, romprops.has_sa1, romprops.srambase, romprops.sramsize_bytes);
   if(flags & LOADROM_WITH_SRAM) {
     if(romprops.ramsize_bytes) {
-      sram_memset(SRAM_SAVE_ADDR, romprops.ramsize_bytes, 0xFF);
-      migrate_and_load_srm(filename, SRAM_SAVE_ADDR);
+      // powerslide relies on the init value to be 00.
+      sram_memset(SRAM_SAVE_ADDR, romprops.ramsize_bytes, romprops.has_gsu ? 0x00 : 0xFF);
+      if (romprops.sramsize_bytes) migrate_and_load_srm(filename, SRAM_SAVE_ADDR);
       /* file not found error is ok (SRM file might not exist yet) */
       if(file_res == FR_NO_FILE) file_res = 0;
-      saveram_crc_old = calc_sram_crc(SRAM_SAVE_ADDR, romprops.ramsize_bytes);
+      saveram_crc_old = calc_sram_crc(SRAM_SAVE_ADDR + romprops.srambase, romprops.sramsize_bytes, 0);
+      saveram_crc = 0;
+      saveram_offset = 0;
     } else {
       printf("No SRAM\n");
     }
@@ -349,51 +460,109 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   }
   printf("done\n");
 
-  if(cfg_is_r213f_override_enabled() && (filename != (uint8_t*)"/sd2snes/menu.bin") && !ST.is_u16) {
+  printf("r213fen=%d is_u16=%d filename=%s\n", cfg_is_r213f_override_enabled(), STS.is_u16, filename);
+  if(cfg_is_r213f_override_enabled() && !is_menu && !STS.is_u16) {
     romprops.fpga_features |= FEAT_213F; /* e.g. for general consoles */
   }
   fpga_set_213f(romprops.region);
 //  fpga_set_features(romprops.fpga_features);
-  fpga_set_dspfeat(romprops.fpga_dspfeat);
+  fpga_set_chipfeat(sgb_romprops.has_sgb ? sgb_romprops.fpga_sgbfeat : romprops.fpga_dspfeat);
+  fpga_set_dac_boost(CFG.msu_volume_boost);
   dac_pause();
   dac_reset(0);
+/* fully enable pair mode again instead of just setting the video/d4 mode
+   in case previous pair mode entry was skipped / pair mode undetected so far */
   if(get_cic_state() == CIC_PAIR) {
-    if(filename != (uint8_t*)"/sd2snes/menu.bin") {
+    if(!is_menu) {
       if(CFG.vidmode_game == VIDMODE_AUTO) {
-        cic_videomode(romprops.region);
+        cic_pair(romprops.region, romprops.region);
       } else {
-        cic_videomode(CFG.vidmode_game);
+        cic_pair(CFG.vidmode_game, romprops.region);
       }
-      cic_d4(romprops.region);
     }
+  }
+
+  if(cfg_is_onechip_transient_fixes() && !is_menu) {
+    romprops.fpga_features |= FEAT_2100;
+  }
+  romprops.fpga_features |= FEAT_2100_LIMIT(cfg_get_brightness_limit());
+
+  /* enable Satellaview Base emulation only if no physical Satellaview Base unit is present */
+  if(!STS.has_satellaview) {
+    romprops.fpga_features |= FEAT_SATELLABASE;
   }
 
   if(flags & LOADROM_WAIT_SNES) {
     while(snes_get_mcu_cmd() != SNES_CMD_RESET) cli_entrycheck();
   }
 
-  set_mapper(romprops.mapper_id);
+  set_mapper(sgb_romprops.has_sgb ? sgb_romprops.mapper_id : romprops.mapper_id);
+
+  if (romprops.has_combo) {
+    static uint32_t combo_srambase = 0;
+    static uint32_t combo_sramsize_bytes = 0;
+  
+    // set version number
+    snescmd_writebyte(COMBO_VERSION, SNESCMD_COMBO_VERSION);
+  
+    if (flags & LOADROM_WITH_COMBO) {
+      // restore proper bounds
+      romprops.srambase = combo_srambase;
+      romprops.sramsize_bytes = combo_sramsize_bytes;
+    } else {
+      // base ROM.
+      // set base unlock features.
+      snescmd_writebyte(0x1, SNESCMD_MAP);
+      // record the saveram properties
+      combo_srambase = romprops.srambase;
+      combo_sramsize_bytes = romprops.sramsize_bytes;
+    }
+  }
 
 //printf("%04lx\n", romprops.header_address + ((void*)&romprops.header.vect_irq16 - (void*)&romprops.header));
   if(flags & (LOADROM_WITH_RESET|LOADROM_WAIT_SNES)) {
-    printf("resetting SNES\n");
-    fpga_dspx_reset(1);
-    snes_reset(1);
-    if(ST.is_u16 && (ST.u16_cfg & 0x01)) {
-      delay_ms(60*SNES_RESET_PULSELEN_MS);
-    } else {
-      delay_ms(SNES_RESET_PULSELEN_MS);
-    }
-    snescmd_prepare_nmihook();
-    cheat_yaml_load(filename);
-// XXX    cheat_yaml_save(filename);
-    cheat_program();
-    fpga_set_features(romprops.fpga_features);
-    snes_reset(0);
-    fpga_dspx_reset(0);
+    assert_reset();
+    init(filename);
+    deassert_reset();
   }
+  // loading a new rom implies the previous crc is no longer valid
+  sram_crc_valid = romprops.has_combo ? 1 : 0;
+  sram_crc_init = 1;
+  sram_crc_romsize = filesize - romprops.offset;
 
   return (uint32_t)filesize;
+}
+
+void assert_reset() {
+  printf("resetting SNES\n");
+  fpga_dspx_reset(1);
+  snes_reset(1);
+  if(STS.is_u16 && (STS.u16_cfg & 0x01)) {
+    delay_ms(60*SNES_RESET_PULSELEN_MS);
+  } else {
+    delay_ms(SNES_RESET_PULSELEN_MS);
+  }
+}
+
+void init(uint8_t *filename) {
+  snescmd_prepare_nmihook();
+  if (CFG.reset_patch) snescmd_writebyte(0, SNESCMD_RESET_HOOK+1);
+  cheat_yaml_load(filename);
+// XXX    cheat_yaml_save(filename);
+  cheat_program();
+  savestate_program();
+  fpga_set_features(romprops.fpga_features);
+  fpga_reset_srtc_state();
+  snes_set_mcu_cmd(0);
+  // init save state region - VRAM, APURAM, CGRAM, OAM only
+  sram_memset(0xF70000, 0x30000, 0);
+}
+
+void deassert_reset() {
+  snes_reset(0);
+  fpga_dspx_reset(0);
+  // handle reset loop from hook
+  snes_reset_loop();
 }
 
 uint32_t load_spc(uint8_t* filename, uint32_t spc_data_addr, uint32_t spc_header_addr) {
@@ -595,50 +764,52 @@ void save_srm(uint8_t* filename, uint32_t sram_size, uint32_t base_addr) {
 
 void save_sram(uint8_t* filename, uint32_t sram_size, uint32_t base_addr) {
   uint32_t count = 0;
-
+  uint32_t remain = sram_size;
+  size_t copy;
   FPGA_DESELECT();
   file_open(filename, FA_CREATE_ALWAYS | FA_WRITE);
   if(file_res) {
     uart_putc(0x30+file_res);
     return;
   }
-  while(count<sram_size) {
-    set_mcu_addr(base_addr+count);
-    FPGA_SELECT();
-    FPGA_TX_BYTE(0x88); /* read */
-    for(int j=0; j<sizeof(file_buf); j++) {
+  set_mcu_addr(base_addr);
+  FPGA_SELECT();
+  FPGA_TX_BYTE(0x88); /* read */
+  while(remain) {
+    copy = (remain > 512) ? 512 : remain;
+    for(int j=0; j < copy; j++) {
       FPGA_WAIT_RDY();
       file_buf[j] = FPGA_RX_BYTE();
       count++;
     }
-    FPGA_DESELECT();
-    file_write();
+    file_write(copy);
     if(file_res) {
       uart_putc(0x30+file_res);
       return;
     }
+    remain -= copy;
   }
+  FPGA_DESELECT();
   file_close();
 }
 
-
-uint32_t calc_sram_crc(uint32_t base_addr, uint32_t size) {
+uint32_t calc_sram_crc(uint32_t base_addr, uint32_t size, uint32_t crc) {
   uint8_t data;
   uint32_t count;
-  uint32_t crc;
-  crc=0;
   crc_valid=1;
   set_mcu_addr(base_addr);
   FPGA_SELECT();
-  FPGA_TX_BYTE(0x88);
+  FPGA_TX_BYTE(FPGA_CMD_READMEM | FPGA_MEM_AUTOINC);
   for(count=0; count<size; count++) {
     FPGA_WAIT_RDY();
     data = FPGA_RX_BYTE();
     if(get_snes_reset()) {
       crc_valid = 0;
+      sram_crc_valid = romprops.has_combo ? 1 : 0;
+      sram_crc_init = 1;
       break;
     }
-    crc += crc32_update(crc, data);
+    crc = crc32_update(crc, data);
   }
   FPGA_DESELECT();
   return crc;

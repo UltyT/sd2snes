@@ -1,3 +1,4 @@
+.link page $c0
 #include "memmap.i65"
 #include "dma.i65"
 .word nmihook
@@ -41,7 +42,7 @@ GAME_MAIN:
   sta $4371
   sta $420b
   ; The following initialization processes must not touch memory
-  ; structures used by the file selector !
+  ; structures used by the file selector!
   jsr killdma
   jsr apu_ram_init
   jsr waitblank
@@ -52,7 +53,8 @@ GAME_MAIN:
   jsr video_init
   jsr setup_hdma
   jsr detect_ultra16
-  lda #$0f
+  jsr detect_satellaview
+  lda @CFG_BRIGHTNESS_LIMIT
   sta cur_bright
   sta tgt_bright
   sta $2100
@@ -63,7 +65,12 @@ set_bank:
 
 coldboot:       ; Regular, cold-start init
   sep #$20 : .as
-  jsr killdma
+  lda @CFG_SHOW_TRIBUTE
+  beq +
+    jsr near_screen
+    lda #$00
+    sta @CFG_SHOW_TRIBUTE
++ jsr killdma
   jsr clear_wram
   jsr apu_ram_init
   jsr waitblank
@@ -74,6 +81,7 @@ coldboot:       ; Regular, cold-start init
   jsr video_init
   jsr setup_hdma
   jsr detect_ultra16
+  jsr detect_satellaview
   jsr screen_on
   jsr wait_mcu_ready
   jsr filesel_init
@@ -304,8 +312,9 @@ video_init:
 
 screen_on:
   stz $2100     ; screen on, 0% brightness
-  lda #$0f
+  lda @CFG_BRIGHTNESS_LIMIT
   sta tgt_bright
+  sta bright_limit
   rts
 
 snes_init:
@@ -695,5 +704,31 @@ detect_ultra16_found:
 detect_ultra16_out:
   lda #$55
   sta @$0021c0
+  plp
+  rts
+
+detect_satellaview:
+  php
+  sep #$20 : .as
+  lda #$aa
+  sta $2188
+  cmp $2188
+  bne detect_satellaview_out
+  lda #$55
+  sta $2188
+  cmp $2188
+  bne detect_satellaview_out
+detect_satellaview_found:
+  stz $2188
+  stz $2189
+  stz $218e
+  stz $218f
+  lda #$01
+  sta @ST_HAS_SATELLAVIEW
+  plp
+  rts
+detect_satellaview_out:
+  lda #$00
+  sta @ST_HAS_SATELLAVIEW
   plp
   rts

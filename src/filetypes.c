@@ -54,7 +54,7 @@ extern cfg_t CFG;
  *      n bytes   file/dir name
  */
 
-uint16_t scan_dir(const uint8_t *path, const uint32_t base_addr, const SNES_FTYPE type_mask) {
+uint16_t scan_dir(const uint8_t *path, const uint32_t base_addr, const SNES_FTYPE *filetypes) {
   DIR dir;
   FRESULT res;
   FILINFO fno;
@@ -78,7 +78,7 @@ printf("start\n");
       if(res != FR_OK || fno.fname[0] == 0 || numentries >= 16000)break;
       fn = *fno.lfname ? fno.lfname : fno.fname;
       type = determine_filetype(fno);
-      if(type & type_mask) {
+      if(is_requested_filetype(type, filetypes)) {
         switch(type) {
           case TYPE_ROM:
           case TYPE_SPC:
@@ -90,7 +90,7 @@ printf("start\n");
               /* omit dot directories except '..' */
               if(fn[0]=='.' && fn[1]!='.') continue;
               /* omit sd2snes directory specifically */
-              if(!strcasecmp(fn, "sd2snes")) continue;
+              if(strstr(fn, "sd2snes")) continue;
               snprintf(buf, sizeof(buf), " <dir>");
             } else {
               if(fn[0]=='.') continue; /* omit dot files */
@@ -105,8 +105,11 @@ printf("start\n");
               fn[fnlen+1] = 0;
               fnlen++;
             }
+            /* write file size string */
             sram_writeblock(buf, file_tbl_off, 6);
+            /* write file name string (leaf) */
             sram_writeblock(fn, file_tbl_off+6, fnlen+1);
+            /* link file string entry in directory table */
             sram_writelong((file_tbl_off-SRAM_MENU_ADDR) | ((uint32_t)type << 24), ptr_tbl_off);
             file_tbl_off += fnlen+7;
             ptr_tbl_off += 4;
@@ -145,6 +148,8 @@ SNES_FTYPE determine_filetype(FILINFO fno) {
      ||(!strcasecmp(ext+1, "FIG"))
      ||(!strcasecmp(ext+1, "SWC"))
      ||(!strcasecmp(ext+1, "BS"))
+     ||(!strcasecmp(ext+1, "GB"))
+     ||(!strcasecmp(ext+1, "GBC"))
     ) {
     return TYPE_ROM;
   }
@@ -199,4 +204,8 @@ void make_filesize_string(char *buf, uint32_t size) {
   }
   snprintf(buf, 6, "% 5ld", fsize);
   strncat(buf, size_units[unit_idx], 1);
+}
+
+int is_requested_filetype(SNES_FTYPE type, const SNES_FTYPE *filetypes) {
+  return strchr((const char*)filetypes, (int)type) != NULL;
 }

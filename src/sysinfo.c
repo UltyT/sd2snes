@@ -14,8 +14,12 @@
 #include "cic.h"
 #include "sdnative.h"
 #include "sysinfo.h"
+#include "usbinterface.h"
+#include "cfg.h"
+#include "sgb.h"
 
-extern status_t ST;
+extern snes_status_t STS;
+extern cfg_t CFG;
 
 static uint32_t sd_tacc_max, sd_tacc_avg;
 
@@ -27,6 +31,7 @@ void sysinfo_loop() {
   while(snes_get_mcu_cmd() == SNES_CMD_SYSINFO) {
     sd_measured = write_sysinfo(sd_measured);
     delay_ms(100);
+    usbint_handler();
   }
   echo_mcu_cmd();
 }
@@ -47,7 +52,9 @@ int write_sysinfo(int sd_measured) {
   FATFS *ffs = &fatfs;
   status_save_from_menu();
 
-  if(!sd_measured)sram_writeblock("Calculating disk space\x7f\x80                ", sram_addr, 40);
+  if (!sd_measured) {
+    sram_writeblock("Calculating disk space\x7f\x80                ", sram_addr, 40);
+  }
   /* remount before sdn_getcid so fatfs registers the disk state change first */
   f_getfree("0:", &fsfree, &ffs);
   sd_cid = sdn_getcid();
@@ -55,37 +62,25 @@ int write_sysinfo(int sd_measured) {
   fssize = ((uint64_t)fatfs.n_fatent - 2LL) * (uint64_t)fatfs.csize * 512LL / 1048576LL;
   fsfree = ((uint64_t)fsfree) * (uint64_t)fatfs.csize * 512LL / 1048576LL;
 
-  len = snprintf(linebuf, sizeof(linebuf), "Firmware version: %s", CONFIG_VERSION);
+  len = snprintf(linebuf, sizeof(linebuf), "    Firmware version: %s", CONFIG_VERSION);
   memset(linebuf+len, 0x20, 40-len);
   sram_writeblock(linebuf, sram_addr, 40);
   sram_addr += 40;
-  len = snprintf(linebuf, sizeof(linebuf), "                                        ");
-  memset(linebuf+len, 0x20, 40-len);
-  sram_writeblock(linebuf, sram_addr, 40);
+  sram_memset(sram_addr, 40, 0x20);
   sram_addr += 40;
-  if(disk_state == DISK_REMOVED) {
+  if(disk_state == DISK_REMOVED || usbint_server_busy()) {
     sd_measured = 0;
     sd_tacc_max = 0;
     sd_tacc_avg = 0;
-    len = snprintf(linebuf, sizeof(linebuf), "                                        ");
-    memset(linebuf+len, 0x20, 40-len);
-    sram_writeblock(linebuf, sram_addr, 40);
+    sram_memset(sram_addr, 40, 0x20);
     sram_addr += 40;
-    len = snprintf(linebuf, sizeof(linebuf), "                                        ");
-    memset(linebuf+len, 0x20, 40-len);
-    sram_writeblock(linebuf, sram_addr, 40);
+    sram_memset(sram_addr, 40, 0x20);
     sram_addr += 40;
-    len = snprintf(linebuf, sizeof(linebuf), "         *** SD Card removed ***        ");
-    memset(linebuf+len, 0x20, 40-len);
-    sram_writeblock(linebuf, sram_addr, 40);
+    sram_writestrn("    *** SD Card removed/USB busy ***    ", sram_addr, 40);
     sram_addr += 40;
-    len = snprintf(linebuf, sizeof(linebuf), "                                        ");
-    memset(linebuf+len, 0x20, 40-len);
-    sram_writeblock(linebuf, sram_addr, 40);
+    sram_memset(sram_addr, 40, 0x20);
     sram_addr += 40;
-    len = snprintf(linebuf, sizeof(linebuf), "                                        ");
-    memset(linebuf+len, 0x20, 40-len);
-    sram_writeblock(linebuf, sram_addr, 40);
+    sram_memset(sram_addr, 40, 0x20);
     sram_addr += 40;
     sd_ok = 0;
   } else {
@@ -113,11 +108,23 @@ int write_sysinfo(int sd_measured) {
     memset(linebuf+len, 0x20, 40-len);
     sram_writeblock(linebuf, sram_addr, 40);
     sram_addr += 40;
+
+    static uint8_t sgb_state = SGB_BIOS_CHECK;
+    if(sgb_state == SGB_BIOS_CHECK) {
+      sgb_state = sgb_bios_state();
+    }
+    len = snprintf(linebuf, sizeof(linebuf), "sgb%d_boot.bin/sgb%d_snes.bin: %s", CFG.sgb_bios_version, CFG.sgb_bios_version, (
+      sgb_state == SGB_BIOS_MISSING ? "missing"
+      : sgb_state == SGB_BIOS_MISMATCH ? "mismatch"
+      : sgb_state == SGB_BIOS_OK ? "ok"
+      : "checking"
+    ));
+    memset(linebuf+len, 0x20, 40-len);
+    sram_writeblock(linebuf, sram_addr, 40);
+    sram_addr += 40;
     sd_ok = 1;
   }
-  len = snprintf(linebuf, sizeof(linebuf), "                                        ");
-  memset(linebuf+len, 0x20, 40-len);
-  sram_writeblock(linebuf, sram_addr, 40);
+  sram_memset(sram_addr, 40, 0x20);
   sram_addr += 40;
   len = snprintf(linebuf, sizeof(linebuf), "CIC state: %s", get_cic_statefriendlyname(get_cic_state()));
   memset(linebuf+len, 0x20, 40-len);
@@ -130,25 +137,22 @@ int write_sysinfo(int sd_measured) {
   memset(linebuf+len, 0x20, 40-len);
   sram_writeblock(linebuf, sram_addr, 40);
   sram_addr += 40;
-  if(ST.is_u16) {
-    if(ST.u16_cfg & 0x01) {
-      len = snprintf(linebuf, sizeof(linebuf), "Ultra16 serial no. %d (Autoboot On)", ST.is_u16);
+  if(STS.is_u16) {
+    if(STS.u16_cfg & 0x01) {
+      len = snprintf(linebuf, sizeof(linebuf), "Ultra16 serial no. %d (Autoboot On)", STS.is_u16);
     } else {
-      len = snprintf(linebuf, sizeof(linebuf), "Ultra16 serial no. %d (Autoboot Off)", ST.is_u16);
+      len = snprintf(linebuf, sizeof(linebuf), "Ultra16 serial no. %d (Autoboot Off)", STS.is_u16);
     }
+    memset(linebuf+len, 0x20, 40-len);
+    sram_writeblock(linebuf, sram_addr, 40);
   } else {
-    len = snprintf(linebuf, sizeof(linebuf), "                                        ");
+    sram_memset(sram_addr, 40, 0x20);
   }
-  memset(linebuf+len, 0x20, 40-len);
-  sram_writeblock(linebuf, sram_addr, 40);
-  sram_addr += 40;
-  len = snprintf(linebuf, sizeof(linebuf), "                                        ");
-  memset(linebuf+len, 0x20, 40-len);
-  sram_writeblock(linebuf, sram_addr, 40);
+
   sram_hexdump(SRAM_SYSINFO_ADDR, 13*40);
   if(sysclk != -1 && sd_ok && !sd_measured){
     sdn_gettacc(&sd_tacc_max, &sd_tacc_avg);
-    sd_measured = 1;
+    if (sd_tacc_max && sd_tacc_avg) sd_measured = 1;
   }
   return sd_measured;
 }

@@ -7,11 +7,14 @@
 #include "cheat.h"
 #include "yaml.h"
 #include "cfg.h"
+#include "sgb.h"
 
 #include <string.h>
 #include <stdlib.h>
 
 extern cfg_t CFG;
+extern sgb_romprops_t sgb_romprops;
+extern snes_romprops_t romprops;
 
 uint8_t rom_index;
 uint8_t wram_index;
@@ -54,12 +57,16 @@ void cheat_program() {
   snescmd_writebyte(wram_index, SNESCMD_NMI_WRAM_PATCH_COUNT);
   printf("enable mask=%02x\n", enable_mask);
   fpga_write_cheat(6, enable_mask);
-  cheat_enable(1);
-  cheat_nmi_enable(CFG.enable_irq_hook);
-  cheat_irq_enable(CFG.enable_irq_hook);
-  cheat_holdoff_enable(CFG.enable_irq_holdoff);
-  cheat_buttons_enable(CFG.enable_irq_buttons);
+  cheat_enable(CFG.enable_cheats);
+  //cheat_nmi_enable(romprops.has_gsu ? 0 : CFG.enable_irq_hook);
+  cheat_nmi_enable(CFG.enable_ingame_hook);
+  //cheat_irq_enable(romprops.has_gsu ? 0 : CFG.enable_irq_hook);
+  cheat_irq_enable((romprops.has_gsu && !strncmp((char *)romprops.header.name, "DOOM", strlen("DOOM"))) ? 0 : CFG.enable_ingame_hook);
+  cheat_holdoff_enable(CFG.enable_hook_holdoff);
+  cheat_buttons_enable(CFG.enable_ingame_buttons);
   cheat_wram_present(wram_index);
+
+  sgb_cheat_program();
 }
 
 void cheat_program_single(cheat_patch_record_t *cheat) {
@@ -179,7 +186,7 @@ void cheat_yaml_load(uint8_t* romfilename) {
     yaml_get_itemvalue("Code", &token);
     if(token.type == YAML_LIST_START) {
       for(i=0; i < CHEAT_NUM_CODES_PER_CHEAT; i++) {
-        if(yaml_get_next(&token) == EOF) break;
+        if(!yaml_get_next(&token)) break;
         if(token.type == YAML_LIST_END) break;
         cheat.patches[i].code = cheat_str2bin(token.stringvalue);
       }

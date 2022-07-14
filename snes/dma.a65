@@ -1,11 +1,9 @@
-
+.link page $c0
 killdma:
   php
-  stz $420b
-  stz $420c
-
   rep #$20 : .al
   sep #$10 : .xs
+  stz $420b
   lda #$ffff
   ldy #$7c
 - dey
@@ -38,7 +36,7 @@ setup_hdma:
   sta $4314
 
   lda #$02      ;A to B; direct; 2x single reg
-  sta $4320     ;we use ch. 2 for color data
+  sta $4320     ;ch. 2 for color data
   lda #$22      ;2122 = CG RAM
   sta $4321     ;dest: CG RAM
   lda #^hdma_pal
