@@ -44,7 +44,6 @@ extern uint8_t SPI_OFFLOAD;
 
 extern const uint8_t *fpga_config;
 
-<<<<<<< HEAD
 #define FPGA_SPC7110 ((const uint8_t*)"/sd2snes/fpga_spc7110." FPGA_CONF_EXT)
 #define FPGA_CX4 ((const uint8_t*)"/sd2snes/fpga_cx4." FPGA_CONF_EXT)
 #define FPGA_OBC1 ((const uint8_t*)"/sd2snes/fpga_obc1." FPGA_CONF_EXT)
@@ -54,7 +53,6 @@ extern const uint8_t *fpga_config;
 #define FPGA_SGB ((const uint8_t*)"/sd2snes/fpga_sgb." FPGA_CONF_EXT)
 #define FPGA_BASE ((const uint8_t*)"/sd2snes/fpga_base." FPGA_CONF_EXT)
 #define FPGA_DSP ((const uint8_t*)"/sd2snes/fpga_dsp." FPGA_CONF_EXT)
->>>>>>> local/develop
 #define FPGA_ROM ((const uint8_t*)"rom")
 
 #define FPGA_TEST_TOKEN	(0xa5)
